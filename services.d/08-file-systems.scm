@@ -7,15 +7,13 @@
 
 (define file-systems
   (service '(file-systems)
-           #:documentation
-           "Mount all non-network filesystems from /etc/fstab (idempotent)."
-           #:requirement '(root-rw run dev udev-settle)
-           #:start ;; TODO: lispify(calling function for mount)
-           (make-system-constructor
-            "mount -a -t nosysfs,nonfs,nonfs4,nosmbfs,nocifs 2>/dev/null || true")
-           #:stop
-           (make-system-destructor
-            "umount -a -t nosysfs,nonfs,nonfs4,nosmbfs,nocifs 2>/dev/null || true")
+           #:documentation "Mount all non-network filesystems from /etc/fstab."
+           ;; We depend on tmpfs so /tmp is ready before apps try to use it
+           #:requirement '(root-rw tmpfs run dev udev-settle)
+           #:start (lambda _
+                     (zero? (system* "mount" "-a" "-t" "nosysfs,nonfs,nonfs4,nosmbfs,nocifs")))
+           #:stop (lambda _
+                    (zero? (system* "umount" "-a" "-t" "nosysfs,nonfs,nonfs4,nosmbfs,nocifs")))
            #:one-shot? #t))
 
 (register-services (list file-systems))
