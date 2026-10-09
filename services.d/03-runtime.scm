@@ -6,12 +6,14 @@
 
 (define runtime-directories
   (service '(runtime-directories)
-    #:documentation "Create early runtime directories under /run, /var/log."
-    #:requirement '(run root-rw)
-    #:start (make-system-constructor
-             "mkdir -p /run/runit /run/udev /run/systemd /run/user /run/lock
-              mkdir -p /run/shepherd /var/log/shepherd /var/log/socklog")
-    #:stop (const #t)
-    #:one-shot? #t))
+           #:documentation "Create early runtime directories under /run, /var/log."
+           #:requirement '(run root-rw)
+           #:start (lambda _
+                     (apply system* "mkdir" "-p"
+                            '("/run/runit" "/run/udev" "/run/systemd" "/run/user" "/run/lock"
+                              "/run/shepherd" "/var/log/shepherd" "/var/log/socklog"))
+                     #t)
+           #:stop (const #t)
+           #:one-shot? #t))
 
 (register-services (list runtime-directories))
