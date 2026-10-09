@@ -8,16 +8,22 @@
   (service '(zram swap-zram)
            #:documentation "Set up a zram swap device."
            #:requirement '(static-device-nodes)
-           #:start (make-system-constructor
-                    ;; TODO: lispify
-                    "modprobe zram 2>/dev/null || true
-              echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null || true
-              echo 8G > /sys/block/zram0/disksize 2>/dev/null || true
-              mkswap /dev/zram0 2>/dev/null || true
-              swapon /dev/zram0 2>/dev/null || true")
-           #:stop (make-system-destructor
-                   "swapoff /dev/zram0 2>/dev/null || true
-             echo 1 > /sys/block/zram0/reset 2>/dev/null || true")
+           #:start (lambda _
+                     (system* "modprobe" "zram")
+                     (call-with-output-file "/sys/block/zram0/comp_algorithm"
+                       (lambda (p) (display "lz4\n" p)))
+                     (call-with-output-file "/sys/block/zram0/disksize"
+                       (lambda (p)
+                         (display (* 8 1024 1024 1024) p)  ;; 8GB -> B
+                         (newline p)))
+                     (system* "mkswap" "/dev/zram0")
+                     (system* "swapon" "/dev/zram0")
+                     #t)
+           #:stop (lambda _
+                    (system* "swapoff" "/dev/zram0")
+                    (call-with-output-file "/sys/block/zram0/reset"
+                      (lambda (p) (display "1\n" p)))
+                    #t)
            #:one-shot? #t))
 
 (register-services (list zram))
