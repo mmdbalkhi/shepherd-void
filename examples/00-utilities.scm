@@ -1,5 +1,5 @@
 ;;; 00-utilities.scm --- shared helpers (loaded first; registers nothing).
-;; Because ~scandir~ in config.scm loads every *.scm file, these helpers are
+;; Because ~scandir~ in init.scm loads every *.scm file, these helpers are
 ;; available to every service below.  They encode the small, repeated pieces
 ;; (mount-option formatting, idempotent mountpoint checks) so that individual
 ;; service files read like declarative data, not shell.

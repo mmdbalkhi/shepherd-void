@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 2026-10-09 Fri 22:59 -->
+<!-- 2026-10-09 Fri 23:49 -->
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>s6-linux-init + Shepherd boot configuration</title>
@@ -982,7 +982,14 @@ mjx-container, .MathJax, .katex { margin: 0.6em 0; }
 </li>
 <li><a href="#org254302a">5. Runtime model (what you observe at boot)</a></li>
 <li><a href="#org3c132fa">6. Layout</a></li>
-<li><a href="#orge12ec43">7. Install &amp; bring up (manual)</a></li>
+<li><a href="#org3aa5dfe">7. User Shepherd (Graphical Session)</a>
+<ul>
+<li><a href="#org77d42f8">7.1. Session Flow</a></li>
+<li><a href="#org982ced9">7.2. Installation &amp; Bring Up</a></li>
+<li><a href="#orge4b82dc">7.3. Managing the Session</a></li>
+</ul>
+</li>
+<li><a href="#orgf961861">8. Install &amp; bring up (manual)</a></li>
 </ul>
 </div>
 </nav>
@@ -1063,7 +1070,7 @@ mountpoint -q /var/cache || mount -t btrfs -o <span style="color: #D8DEE9;">subv
 </span><span style="color: #D8DEE9;">SHEPHERD</span>=/usr/local/bin/shepherd    <span style="color: #6f7787;"># </span><span style="color: #6f7787;">or /gnu/current-guix-profile/bin/shepherd
 </span><span style="color: #81A1C1;">[</span> -x <span style="color: #A3BE8C;">"</span><span style="color: #81A1C1;">$</span><span style="color: #D8DEE9;">SHEPHERD</span><span style="color: #A3BE8C;">"</span> <span style="color: #81A1C1;">]</span> || <span style="color: #81A1C1;">exec</span> /sbin/agetty --noclear -a root tty1 linux
 <span style="color: #8FBCBB;">mkdir</span> -p /run/shepherd
-<span style="color: #A3BE8C;">"</span><span style="color: #81A1C1;">$</span><span style="color: #D8DEE9;">SHEPHERD</span><span style="color: #A3BE8C;">"</span> -c /etc/shepherd/config.scm -s /run/shepherd/socket <span style="color: #A3BE8C;">\</span>
+<span style="color: #A3BE8C;">"</span><span style="color: #81A1C1;">$</span><span style="color: #D8DEE9;">SHEPHERD</span><span style="color: #A3BE8C;">"</span> -c /etc/shepherd/init.scm -s /run/shepherd/socket <span style="color: #A3BE8C;">\</span>
             -l /var/log/shepherd.log -I
 </code></pre>
 </div>
@@ -1071,7 +1078,7 @@ mountpoint -q /var/cache || mount -t btrfs -o <span style="color: #D8DEE9;">subv
 <label for='mn-auto.9480273' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.9480273' class='margin-toggle'><div class="marginnote" id="org19fd414">
 <p>
 The generator writes <code>current/scripts/rc.init</code> from <code>skel/rc.init</code>.  Edit the
-<code>skel</code> copy and re-run <code>s6-linux-init-maker</code> — never patch <code>current</code> directly.
+<code>skel</code> copy and re-run <code>s6-linux-init-maker</code>. never patch <code>current</code> directly.
 </p>
 
 </div>
@@ -1142,7 +1149,6 @@ Boot DAG (what actually gates the gettys):
                  fully-online ─ network-manager ───┘
 
                    seatd · acpid · zram · ssh · chrony
-                         (float — do NOT gate login)
 </pre>
 
 <label for='mn-auto.6905364' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.6905364' class='margin-toggle'><div class="marginnote" id="org57c69ed">
@@ -1200,7 +1206,7 @@ The stage <code>#:requirement</code> list is the &ldquo;what must be up before X
 Add your symbol there to make it part of an ordered phase; leave it out and it only starts if something
 else pulls it in.
 </span></li>
-<li>Reload: <code>herd load config.scm</code>.  Shepherd restarts only what changed; already-running services are untouched.</li>
+<li>Reload: <code>herd load init.scm</code>.  Shepherd restarts only what changed; already-running services are untouched.</li>
 </ol>
 </div>
 <div id="outline-container-orgefdf570" class="outline-3">
@@ -1253,7 +1259,7 @@ for a desktop session move it to <code>user-shepherd</code>, set <code>HOME</cod
 
 <p>
 To enable: <code>cp</code> the file into <code>/etc/shepherd/services.d/</code>, add <code>syncthing</code> to
-the <code>fully-online</code> <code>stage</code> requirements in <code>28-boot-stages.scm</code>, then <code>herd load config.scm</code>.
+the <code>fully-online</code> <code>stage</code> requirements in <code>28-boot-stages.scm</code>, then <code>herd load init.scm</code>.
 A new <code>syncthing</code> service appears in <code>herd status</code> with no
 Shepherd restart.<label id='fnr.5' for='fnr-in.5.5774974' class='margin-toggle sidenote-number'><sup class='numeral'>5</sup></label><input type='checkbox' id='fnr-in.5.5774974' class='margin-toggle'><span class='sidenote'><sup class='numeral'>5</sup>
 syncthing/README · its systemd unit <code>network-online.target + local-fs.target</code>
@@ -1276,15 +1282,15 @@ the same service under <code>user-shepherd/services.d/</code> with <code>GUIX_PR
 <h2 id="org254302a"><span class="section-number-2">5.</span> Runtime model (what you observe at boot)</h2>
 <div class="outline-text-2" id="text-5">
 <ul class="org-ul">
-<li><code>/etc/shepherd/config.scm</code> loads <code>services.d/*.scm</code>, then <code>(start-in-the-background '(fully-online))</code>.</li>
+<li><code>/etc/shepherd/init.scm</code> loads <code>services.d/*.scm</code>, then <code>(start-in-the-background '(fully-online))</code>.</li>
 <li>Shepherd resolves requirements breadth-first and <i>starts them concurrently</i> where the graph allows.<label id='fnr.6' for='fnr-in.6.3714063' class='margin-toggle sidenote-number'><sup class='numeral'>6</sup></label><input type='checkbox' id='fnr-in.6.3714063' class='margin-toggle'><span class='sidenote'><sup class='numeral'>6</sup>
-<code>start-in-the-background</code> (from <code>services.d/config.scm</code>) spawns a fiber that calls
+<code>start-in-the-background</code> (from <code>services.d/init.scm</code>) spawns a fiber that calls
 <code>start-in-parallel</code>: each node&rsquo;s <code>#:requirement</code> starts first, and siblings with no edge
 between them start concurrently.  Shepherd manual §&ldquo;Dependency resolution&rdquo;.
 </span>
 You see interleaved <code>Starting service X</code> / <code>Service X has been started.</code> lines in <code>/var/log/shepherd.log</code>.</li>
 <li>A service whose <code>#:start</code> throws is marked failed; dependents are skipped / retried, logged,
-and the boot continues on other branches — one bad daemon never hangs the whole boot.<label id='fnr.7' for='fnr-in.7.7916592' class='margin-toggle sidenote-number'><sup class='numeral'>7</sup></label><input type='checkbox' id='fnr-in.7.7916592' class='margin-toggle'><span class='sidenote'><sup class='numeral'>7</sup>
+and the boot continues on other branches. one bad daemon never hangs the whole boot.<label id='fnr.7' for='fnr-in.7.7916592' class='margin-toggle sidenote-number'><sup class='numeral'>7</sup></label><input type='checkbox' id='fnr-in.7.7916592' class='margin-toggle'><span class='sidenote'><sup class='numeral'>7</sup>
 Failures are per-service. Shepherd logs <code>Exception caught while starting X</code> to
 <code>/var/log/shepherd.log</code>, marks the service failed, and continues other branches rather than
 aborting the boot.  That is intentional: a one-shot <code>random-seed</code> failing must not stop <code>udev</code>.
@@ -1321,7 +1327,7 @@ Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &
 <div class="org-src-container">
 <pre class="src src-text"><code>shepherd/
 &#9500;&#9472;&#9472; readme.org                    &lt;- you are here
-&#9500;&#9472;&#9472; config.scm                    &lt;- Shepherd config entry point
+&#9500;&#9472;&#9472; init.scm                    &lt;- Shepherd config entry point
 &#9500;&#9472;&#9472; services.d/
 &#9474;   &#9500;&#9472;&#9472; 00-utilities.scm          &lt;- shared helpers (mounted?, read-rc-conf-var)
 &#9474;   &#9500;&#9472;&#9472; 01-root.scm               &lt;- root-rw remount
@@ -1357,20 +1363,107 @@ Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &
 &#9474;   &#9492;&#9472;&#9472; 28-boot-stages.scm        &lt;- boot-critical -&gt; boot-ready -&gt; interactive -&gt; fully-online
 &#9500;&#9472;&#9472; s6-linux-init/
 &#9474;   &#9492;&#9472;&#9472; skel/rc.init              &lt;- stage-0 handoff (edit here)
-&#9492;&#9472;&#9472; user-shepherd/                &lt;- per-user Shepherd (sway etc.)       (WIP)
-    &#9500;&#9472;&#9472; config.scm
-    &#9492;&#9472;&#9472; services.d/sway.scm
+&#9500;&#9472;&#9472; user-shepherd
+&#9474;   &#9500;&#9472;&#9472; init.scm
+&#9474;   &#9492;&#9472;&#9472; services.d
+&#9474;       &#9500;&#9472;&#9472; 00-utilities.scm
+&#9474;       &#9500;&#9472;&#9472; 01-runtime-dirs.scm
+&#9474;       &#9500;&#9472;&#9472; 02-dbus.scm
+&#9474;       &#9500;&#9472;&#9472; 03-pipewire.scm
+&#9474;       &#9500;&#9472;&#9472; 04-gpg-agent.scm
+&#9474;       &#9500;&#9472;&#9472; 05-sway.scm
+&#9474;       &#9500;&#9472;&#9472; 06-graphical-session.scm
+&#9474;       &#9500;&#9472;&#9472; 07-portals.scm
+&#9474;       &#9500;&#9472;&#9472; 08-dunst.scm
+&#9474;       &#9500;&#9472;&#9472; 09-swayidle.scm
+&#9474;       &#9500;&#9472;&#9472; 10-sway-audio-idle-inhibit.scm
+&#9474;       &#9500;&#9472;&#9472; 11-wlsunset.scm
+&#9474;       &#9500;&#9472;&#9472; 12-clipman.scm
+&#9474;       &#9492;&#9472;&#9472; 13-azotebg.scm
 </code></pre>
 </div>
 </div>
 </section>
-<section id="outline-container-orge12ec43" class="outline-2">
-<h2 id="orge12ec43"><span class="section-number-2">7.</span> Install &amp; bring up (manual)</h2>
+<section id="outline-container-org3aa5dfe" class="outline-2">
+<h2 id="org3aa5dfe"><span class="section-number-2">7.</span> User Shepherd (Graphical Session)</h2>
 <div class="outline-text-2" id="text-7">
+<p>
+While the system Shepherd manages the machine, the User Shepherd manages your
+graphical session (Sway, PipeWire, D-Bus, etc.). It runs as your regular user,
+supervising Wayland compositors and desktop daemons without needing <code>systemd --user</code>.
+</p>
+</div>
+<div id="outline-container-org77d42f8" class="outline-3">
+<h3 id="org77d42f8"><span class="section-number-3">7.1.</span> Session Flow</h3>
+<div class="outline-text-3" id="text-7-1">
+<ol class="org-ol">
+<li><code>init.scm</code> sets <code>XDG_RUNTIME_DIR</code> and <code>DBUS_SESSION_BUS_ADDRESS</code>.</li>
+<li><code>01-runtime-dirs</code> ensures the runtime directory exists with strict <code>0700</code> permissions.</li>
+<li><code>02-dbus</code>, <code>03-pipewire</code>, and <code>04-gpg-agent</code> start in parallel (no GUI dependency).</li>
+<li><code>05-sway</code> starts the compositor (depends on <code>dbus</code> and <code>runtime-dirs</code>).</li>
+<li><code>06-graphical-session</code> barrier resolves once Sway is running.</li>
+<li>ALL GUI services (<code>dunst</code>, <code>portals</code>, <code>swayidle</code>, <code>clipman</code>, etc.) start in parallel.</li>
+</ol>
+</div>
+</div>
+<div id="outline-container-org982ced9" class="outline-3">
+<h3 id="org982ced9"><span class="section-number-3">7.2.</span> Installation &amp; Bring Up</h3>
+<div class="outline-text-3" id="text-7-2">
+<div class="org-src-container">
+<pre class="src src-sh"><code><span style="color: #6f7787;"># </span><span style="color: #6f7787;">1. Copy user Shepherd config and services to your home directory
+</span><span style="color: #8FBCBB;">mkdir</span> -p ~/.config/shepherd/services.d
+<span style="color: #8FBCBB;">cp</span> user-shepherd/init.scm ~/.config/shepherd/init.scm
+<span style="color: #8FBCBB;">cp</span> user-shepherd/services.d/*.scm ~/.config/shepherd/services.d/
+
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">2. Ensure you are in the 'seatd' group (required for Sway to access input/DRM)
+</span><span style="color: #8FBCBB;">sudo</span> usermod -aG _seatd $<span style="color: #D8DEE9;">USER</span>
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">(Log out and log back in for group changes to take effect)
+</span>
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">3. Start the user Shepherd daemon
+</span>shepherd -s /run/shepherd/$<span style="color: #81A1C1;">(</span>id -u<span style="color: #81A1C1;">)</span>.socket <span style="color: #A3BE8C;">\</span>
+    -c ~/.config/shepherd/init.scm -I
+</code></pre>
+</div>
+
+<label for='mn-auto.7403459' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.7403459' class='margin-toggle'><div class="marginnote" id="org5ee81e0">
+<p>
+To start User Shepherd automatically on TTY login, add this to your <code>~/.bash_profile</code>
+or <code>~/.profile</code>:
+<code>if [ -z "$WAYLAND_DISPLAY" ] &amp;&amp; [ "$XDG_VTNR" -eq 1 ]; then exec shepherd -I; fi</code>
+</p>
+
+</div>
+</div>
+</div>
+<div id="outline-container-orge4b82dc" class="outline-3">
+<h3 id="orge4b82dc"><span class="section-number-3">7.3.</span> Managing the Session</h3>
+<div class="outline-text-3" id="text-7-3">
+<p>
+Because every component is a first-class Shepherd service, you can manage them
+individually without restarting the whole session:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh"><code><span style="color: #6f7787;"># </span><span style="color: #6f7787;">Restart just the compositor (apps using DBus/PipeWire will survive!)
+</span>herd restart sway
+
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">Check audio stack status
+</span>herd status pipewire wireplumber pipewire-pulse
+
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">View compositor logs
+</span>tail -f ~/.local/state/shepherd/sway.log
+</code></pre>
+</div>
+</div>
+</div>
+</section>
+<section id="outline-container-orgf961861" class="outline-2">
+<h2 id="orgf961861"><span class="section-number-2">8.</span> Install &amp; bring up (manual)</h2>
+<div class="outline-text-2" id="text-8">
 <div class="org-src-container">
 <pre class="src src-sh"><code><span style="color: #6f7787;"># </span><span style="color: #6f7787;">1. Shepherd config    -&gt;    where rc.init expects it
 </span><span style="color: #8FBCBB;">cp</span> services.d/*.scm           /etc/shepherd/services.d/
-<span style="color: #8FBCBB;">cp</span> config.scm                 /etc/shepherd/config.scm
+<span style="color: #8FBCBB;">cp</span> init.scm                  /etc/shepherd/init.scm
 
 <span style="color: #6f7787;"># </span><span style="color: #6f7787;">2. Shepherd binary visible to rc.init (one of:)
 </span><span style="color: #8FBCBB;">ln</span> -s $<span style="color: #81A1C1;">(</span>guix build shepherd<span style="color: #81A1C1;">)</span>/bin/shepherd /usr/local/bin/shepherd       <span style="color: #6f7787;"># </span><span style="color: #6f7787;">Guix
@@ -1387,7 +1480,7 @@ Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &
 </code></pre>
 </div>
 
-<label for='mn-auto.111200' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.111200' class='margin-toggle'><div class="marginnote" id="orga34b9aa">
+<label for='mn-auto.5157769' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.5157769' class='margin-toggle'><div class="marginnote" id="org33fa5e6">
 <p>
 <code>guix build shepherd</code> resolves to the store path of Shepherd; the symlink keeps
 <code>/usr/local/bin/shepherd</code> stable across profile generations.  <code>guix build</code>
@@ -1399,7 +1492,7 @@ Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &
 </article>
 <footer id="postamble" class="status">
 <p class="date">Date: 2026-10-09 Fri 00:00</p>
-<p class="date">Created: 2026-10-09 Fri 22:59</p>
+<p class="date">Created: 2026-10-09 Fri 23:49</p>
 </footer>
 </body>
 </html>

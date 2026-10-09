@@ -315,13 +315,65 @@ shepherd/
 │       ├── 12-clipman.scm
 │       └── 13-azotebg.scm
 #+END_SRC
+* User Shepherd (Graphical Session)
+
+While the system Shepherd manages the machine, the User Shepherd manages your
+graphical session (Sway, PipeWire, D-Bus, etc.). It runs as your regular user,
+supervising Wayland compositors and desktop daemons without needing ~systemd --user~.
+
+** Session Flow
+1. ~init.scm~ sets ~XDG_RUNTIME_DIR~ and ~DBUS_SESSION_BUS_ADDRESS~.
+2. ~01-runtime-dirs~ ensures the runtime directory exists with strict ~0700~ permissions.
+3. ~02-dbus~, ~03-pipewire~, and ~04-gpg-agent~ start in parallel (no GUI dependency).
+4. ~05-sway~ starts the compositor (depends on ~dbus~ and ~runtime-dirs~).
+5. ~06-graphical-session~ barrier resolves once Sway is running.
+6. ALL GUI services (~dunst~, ~portals~, ~swayidle~, ~clipman~, etc.) start in parallel.
+
+** Installation & Bring Up
+
+#+BEGIN_SRC sh :tangle no
+# 1. Copy user Shepherd config and services to your home directory
+mkdir -p ~/.config/shepherd/services.d
+cp user-shepherd/init.scm ~/.config/shepherd/init.scm
+cp user-shepherd/services.d/*.scm ~/.config/shepherd/services.d/
+
+# 2. Ensure you are in the 'seatd' group (required for Sway to access input/DRM)
+sudo usermod -aG _seatd $USER
+# (Log out and log back in for group changes to take effect)
+
+# 3. Start the user Shepherd daemon
+shepherd -s /run/shepherd/$(id -u).socket \
+    -c ~/.config/shepherd/init.scm -I
+#+END_SRC
+
+#+BEGIN_marginnote
+To start User Shepherd automatically on TTY login, add this to your =~/.bash_profile=
+or =~/.profile=:
+~if [ -z "$WAYLAND_DISPLAY" ] && [ "$XDG_VTNR" -eq 1 ]; then exec shepherd -I; fi~
+#+END_marginnote
+
+** Managing the Session
+
+Because every component is a first-class Shepherd service, you can manage them
+individually without restarting the whole session:
+
+#+BEGIN_SRC sh :tangle no
+# Restart just the compositor (apps using DBus/PipeWire will survive!)
+herd restart sway
+
+# Check audio stack status
+herd status pipewire wireplumber pipewire-pulse
+
+# View compositor logs
+tail -f ~/.local/state/shepherd/sway.log
+#+END_SRC
 
 * Install & bring up (manual)
 
 #+BEGIN_SRC sh :tangle no
 # 1. Shepherd config    ->    where rc.init expects it
 cp services.d/*.scm           /etc/shepherd/services.d/
-cp init.scm                 /etc/shepherd/config.scm
+cp init.scm                  /etc/shepherd/init.scm
 
 # 2. Shepherd binary visible to rc.init (one of:)
 ln -s $(guix build shepherd)/bin/shepherd /usr/local/bin/shepherd       # Guix

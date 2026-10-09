@@ -38,7 +38,7 @@
 
 (define %xdg-runtime
   ;; Inherit from the login session; fall back to the standard per-UID path.
-  ;; config.scm sets this via setenv before loading service files.
+  ;; init.scm sets this via setenv before loading service files.
   (or (getenv "XDG_RUNTIME_DIR")
       (string-append "/run/user/"
                      (number->string (getuid)))))
@@ -84,7 +84,7 @@ resolving to PATH)."
 (define (base-env)
   "Minimal environment variables every user process needs: HOME, PATH,
 XDG_RUNTIME_DIR, and DBUS_SESSION_BUS_ADDRESS, captured from the current
-(Shepherd) process. config.scm sets DBUS_SESSION_BUS_ADDRESS via setenv
+(Shepherd) process. init.scm sets DBUS_SESSION_BUS_ADDRESS via setenv
 before loading services, so all children inherit the session bus address."
   (let ((path (or (getenv "PATH") "/usr/local/bin:/usr/bin:/bin"))
         (term (or (getenv "TERM") "xterm-256color"))

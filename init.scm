@@ -3,7 +3,7 @@
              (srfi srfi-1))
 
 ;; Where this configuration lives.  Default to the standard location; the
-;; s6 ~rc.init~ script points Shepherd here via ~-c /etc/shepherd/config.scm~.
+;; s6 ~rc.init~ script points Shepherd here via ~-c /etc/shepherd/init.scm~.
 (define %services-dir
   (or (getenv "SHEPHERD_SERVICES_DIR")
       "/etc/shepherd/services.d"))
@@ -37,14 +37,14 @@
 ;;        ~Unregistered service') to /var/log/shepherd.log for any symbol that
 ;;        is required but never provided -- i.e. boot still fails fast and
 ;;        loud, just one layer inside the daemon.
-;;    This keeps config.scm free of version-coupled internal accessors.
+;;    This keeps init.scm free of version-coupled internal accessors.
 
 ;; 3. Kick off boot by resolving the ~fully-online~ target's graph.  Placed at
-;;    the end of config.scm on purpose: Shepherd evaluates this file once at
+;;    the end of init.scm on purpose: Shepherd evaluates this file once at
 ;;    startup (launched from s6 stage 0) and starts the machine.  ~start-in-the
 ;;    background' returns immediately so the control socket is served right
 ;;    away; already-running services are left untouched on a later
-;;    ~herd load config.scm~.  (shepherd/service) exports start-in-the-background,
+;;    ~herd load init.scm~.  (shepherd/service) exports start-in-the-background,
 ;;    NOT a bare ~start'.
 (unless (equal? (getenv "SHEPHERD_NO_AUTOBOOT") "1")
   (start-in-the-background '(fully-online)))

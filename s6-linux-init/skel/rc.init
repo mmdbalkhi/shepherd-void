@@ -11,7 +11,7 @@
 # This script does THREE things and no more:
 #   1. ensure /gnu, /var/log, /var/tmp, /var/cache, /var/run exist and are
 #      mounted (the minimal set Shepherd + the store need before it can run),
-#   2. launch the Shepherd daemon (config.scm then drives the whole graph via
+#   2. launch the Shepherd daemon (init.scm then drives the whole graph via
 #      its dependency requirements),
 #   3. tail Shepherd's logfile to the console with a colored spinner.
 # Nothing past this point is managed by s6 -- Shepherd owns udev, dbus,
@@ -115,13 +115,13 @@ fi
 log info "Using $SHEPHERD"
 
 # Launch Shepherd once (idempotent: if it is already running, skip).  The
-# daemon loads /etc/shepherd/config.scm, which calls
+# daemon loads /etc/shepherd/init.scm, which calls
 # (start-in-the-background '(fully-online)) and brings the whole graph up
 # via its dependency requirements.
 if [ ! -S /run/shepherd/socket ]; then
 	"$SHEPHERD" \
 		-s /run/shepherd/socket \
-		-c /etc/shepherd/config.scm \
+		-c /etc/shepherd/init.scm \
 		-l /var/log/shepherd.log \
 		-I >/dev/null 2>&1 &
 	i=0
