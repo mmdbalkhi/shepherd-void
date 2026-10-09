@@ -10,7 +10,8 @@
   (service '(dbus-runtime)
            #:documentation "Create and chown /run/dbus for the D-Bus system bus (dbus:22)."
            #:requirement '(runtime-directories)
-           #:start (make-system-constructor "install -d -m755 -g 22 -o 22 /run/dbus")
+           #:start (lambda _
+                     (zero? (system* "install" "-d" "-m755" "-g" "22" "-o" "22" "/run/dbus")))
            #:stop (const #t)
            #:one-shot? #t))
 
