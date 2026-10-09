@@ -1,5 +1,5 @@
-(use-modules (shepherd service)
-             ((ice-9 ftw) #:select (scandir))
+(define-module (shepherd config) #:declarative? #f)
+(use-modules ((ice-9 ftw) #:select (scandir))
              (srfi srfi-1))
 
 ;; Where this configuration lives.  Default to the standard location; the
