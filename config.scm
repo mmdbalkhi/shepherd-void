@@ -2,10 +2,6 @@
              ((ice-9 ftw) #:select (scandir))
              (srfi srfi-1))
 
-;; Fix Guix locale warnings when running on a non-Guix host (Void)
-(setlocale LC_ALL "en_US.UTF-8")
-(setenv "LC_ALL" "en_US.UTF-8")
-
 ;; Where this configuration lives.  Default to the standard location; the
 ;; s6 ~rc.init~ script points Shepherd here via ~-c /etc/shepherd/config.scm~.
 (define %services-dir
