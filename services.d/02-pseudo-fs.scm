@@ -55,25 +55,24 @@
 
 (define pseudo-fs-mqueue
   (service '(mqueue)
-           #:documentation "Mount /dev/mqueue (best effort)."
+           #:documentation "Mount /dev/mqueue."
            #:requirement '(dev)
-           #:start (make-system-constructor
-                    "mkdir -p /dev/mqueue && \
-              mountpoint -q /dev/mqueue || \
-              mount -t mqueue none /dev/mqueue 2>/dev/null || true")
+           #:start (lambda _
+                     (system* "mkdir" "-p" "/dev/mqueue")
+                     (zero? (system* "mount" "-t" "mqueue" "none" "/dev/mqueue")))
            #:stop (const #t)
            #:one-shot? #t))
 
 (define pseudo-fs-efivarfs
-  ;; UEFI-only; a safe no-op on BIOS firmware.
   (service '(efivarfs)
-           #:documentation "Mount efivarfs (UEFI only)."
+           #:documentation "Mount efivarfs (UEFI/FAT EFI only)."
            #:requirement '(sys)
-           #:start (make-system-constructor
-                    "[ -d /sys/firmware/efi/efivars ] || exit 0
-              mkdir -p /sys/firmware/efi/efivars
-              mountpoint -q /sys/firmware/efi/efivars || \
-              mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true")
+           #:start (lambda _
+                     (if (file-exists? "/sys/firmware/efi/efivars")
+                         (begin
+                           (system* "mkdir" "-p" "/sys/firmware/efi/efivars")
+                           (zero? (system* "mount" "-t" "efivarfs" "efivarfs" "/sys/firmware/efi/efivars")))
+                         #t)) ;; Safe no-op on BIOS
            #:stop (const #t)
            #:one-shot? #t))
 
