@@ -10,13 +10,11 @@
   (service '(root-rw root-filesystem)
            #:documentation "Remount the root file system read/write."
            #:requirement '()
-           #:start (make-system-constructor
-                    "LIBMOUNT_FORCE_MOUNT2=always mount -o remount,rw / 2>/dev/null || true")
-           #:stop
-           ;; We do *not* remount read-only at shutdown: dracut/firmware will reboot
-           ;; or power off, and a failed ro remount must never block shutdown.
-           (make-system-destructor
-            "LIBMOUNT_FORCE_MOUNT2=always mount -o remount,ro / 2>/dev/null || true")
+           #:start (lambda _
+                     (setenv "LIBMOUNT_FORCE_MOUNT2" "always")
+                     (or (zero? (system* "mount" "-o" "remount,rw" "/"))
+                         #t))
+           #:stop (const #t) ;; Let the kernel handle ro remount on poweroff
            #:one-shot? #t))
 
 (register-services (list root-rw))
