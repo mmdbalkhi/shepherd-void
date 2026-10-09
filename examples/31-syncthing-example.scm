@@ -1,4 +1,4 @@
-;;; 31-syncthing-example.scm --- Syncthing daemon (EXAMPLE — not auto-loaded).
+;;; 31-syncthing-example.scm --- Syncthing daemon.
 
 ;; Example service for the "how to add a service" guide in readme.org.
 ;; It is kept under examples/, NOT services.d/, so it is registered only when
