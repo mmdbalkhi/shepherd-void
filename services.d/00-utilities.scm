@@ -1,5 +1,4 @@
 ;;; 00-utilities.scm --- shared helpers (loaded first; registers nothing).
-
 ;; Because ~scandir~ in config.scm loads every *.scm file, these helpers are
 ;; available to every service below.  They encode the small, repeated pieces
 ;; (mount-option formatting, idempotent mountpoint checks) so that individual
@@ -37,10 +36,16 @@ swapon or seedrng.  Returns a truthy value so Shepherd records success."
     (lambda () (apply system* command args))
     (lambda _ #t)))
 
-;; A one-shot service that mounts a pseudo-file-system if absent.  ~type~ is
-;; the fstype passed to ~mount -t~; ~source~ the kernel source; ~target~ the
-;; mount point; ~options~ the list passed via ~-o~.  Never unmounts at stop
-;; time (pseudo-fs are left to the kernel on shutdown, per project rules).
+(define (mounted? dir)
+  (catch 'system-error
+    (lambda ()
+      (let ((st-dir (stat dir))
+            (st-parent (stat (dirname dir))))
+        (not (= (stat:dev st-dir) (stat:dev st-parent)))))
+    (lambda args
+      ;; If the directory doesn't exist yet, it's not mounted.
+      #f)))
+
 (define* (pseudo-fs-service name
                             #:key
                             source
@@ -54,15 +59,20 @@ swapon or seedrng.  Returns a truthy value so Shepherd records success."
    (format #f "Mount pseudo-filesystem ~a on ~a~a."
            type target
            (if (null? options) ""
-               (string-append " (options: "
-                              (string-join options ",")
-                              ")")))
+               (format #f " (options: ~{~a~^,~})" options)))
    #:requirement requirement
    #:start
-   (make-system-constructor
-    (string-append "mountpoint -q " target
-                   " || mount" (opts->string options)
-                   " -t " type " " source " " target " 2>/dev/null || true"))
+   (lambda _
+     ;; Build the mount command arguments purely as a Scheme list.
+     (let ((args (append `("-t" ,type)
+                         (if (null? options)
+                             '()
+                             `("-o" ,(string-join options ",")))
+                         `(,source ,target))))
+       ;; Attempt to mount. If it fails, check if it's already mounted.
+       ;; This makes the service perfectly idempotent without shell scripts.
+       (or (zero? (apply system* "mount" args))
+           (mounted? target))))
    #:stop (const #t)
    #:one-shot? #t))
 
@@ -76,3 +86,24 @@ swapon or seedrng.  Returns a truthy value so Shepherd records success."
            #:start (const #t)
            #:stop (const #t)
            #:one-shot? #t))
+
+(define (read-rc-conf-var var)
+  "Read a variable from /etc/rc.conf (e.g., KEYMAP='us')."
+  (catch 'system-error
+    (lambda ()
+      (call-with-input-file "/etc/rc.conf"
+        (lambda (port)
+          (let loop ((line (read-line port)))
+            (cond
+             ((eof-object? line) #f)
+             ((string-prefix? (string-append var "=") (string-trim-both line))
+              (let* ((val (substring line (+ (string-length var) 1)))
+                     (val (string-trim-both val)))
+                ;; Strip surrounding quotes if present
+                (if (and (>= (string-length val) 2)
+                         (char=? (string-ref val 0) #\")
+                         (char=? (string-ref val (- (string-length val) 1)) #\"))
+                    (substring val 1 (- (string-length val) 1))
+                    val)))
+             (else (loop (read-line port))))))))
+    (lambda args #f)))
