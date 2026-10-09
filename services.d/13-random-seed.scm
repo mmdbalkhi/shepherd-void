@@ -14,7 +14,9 @@
            #:documentation "Credit the kernel CSPRNG with seedrng."
            #:requirement '(root-rw file-systems)
            #:start seedrng-thunk
-           #:stop (const #t)
+           #:stop (lambda _
+                    (system* "seedrng" "save")
+                    #t)
            #:one-shot? #t))
 
 (register-services (list random-seed))
