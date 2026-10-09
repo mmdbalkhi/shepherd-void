@@ -1,26 +1,32 @@
-;;; WIP :: User Shepherd config (copy to ~/.config/shepherd/config.scm).
+;;; User Shepherd config (copy to ~/.config/shepherd/config.scm).
 ;;
-;; Run as the regular user (komeil) with:
-;;
-;;   guix package -i shepherd                   # or the Void `shepherd` package
+;; Run as the regular user with:
+;;   guix package -i shepherd
 ;;   mkdir -p ~/.config/shepherd
 ;;   cp -r ~/.dotfiles/shepherd/user-shepherd/services.d \
 ;;         ~/.config/shepherd/services.d
 ;;   cp ~/.dotfiles/shepherd/user-shepherd/config.scm \
 ;;         ~/.config/shepherd/config.scm
-;;   shepherd -s /run/shepherd/komeil.socket \
+;;   shepherd -s /run/shepherd/$(id -u).socket \
 ;;       -c ~/.config/shepherd/config.scm -I
 ;;
 ;; Expects:
 ;;   * a system seatd socket at /run/seatd/socket (the root `seatd` service
 ;;     in Stage 3; this user must be in the `_seatd' group:
-;;     usermod -aG _seatd komeil);
-;;   * sway etc. installed via guix:
-;;     guix install sway swayidle swaylock waybar mako grim slurp;
+;;     usermod -aG _seatd komeil)
+;;   * xbps packages installed (see required-packages list below)
 ;;   * XDG_RUNTIME_DIR=/run/user/$UID (elogind on the system side creates it
 ;;     via PAM when you log in on an agetty with elogind running).
 ;;
-;; `start-in-the-background '(desktop)` pulls the graph: sway -> swaylock.
+;; Session flow:
+;;   Shepherd starts → loads services.d/*.scm
+;;     → runtime-dirs sets up XDG_RUNTIME_DIR + DBUS_SESSION_BUS_ADDRESS
+;;     → dbus, gpg-agent, pipewire start in parallel (no GUI dependency)
+;;     → sway starts (compositor)
+;;       → graphical-session barrier becomes ready
+;;       → ALL GUI services start in parallel (dunst, swayidle, portals, etc.)
+;;     → sway-session barrier resolves
+;;   `herd restart sway` / `herd restart pipewire` / etc. all work.
 
 (use-modules (shepherd service)
              ((ice-9 ftw) #:select (scandir)))
@@ -30,6 +36,10 @@
       (string-append (or (getenv "HOME") "/home/komeil")
                      "/.config/shepherd/services.d")))
 
+;; 1. Load every *.scm (alphabetically) from the services directory.
+;;    Each file registers its own services; #:requirement may reference a
+;;    service defined in an earlier-loaded file (resolved lazily at start
+;;    time).  00-utilities.scm sorts first so helpers are available.
 (for-each
  (lambda (file)
    (load (string-append %services-directory "/" file)))
@@ -38,22 +48,22 @@
             (and (string-suffix? ".scm" f)
                  (not (string-prefix? "." f))))))
 
-(define %guix-profile
-  (or (getenv "GUIX_PROFILE")
-      (string-append (or (getenv "HOME") "/home/komeil")
-                     "/.guix-profile")))
-
-(define desktop
-  (service '(desktop)
-           #:documentation "Stage 4: the user's graphical desktop (Wayland/sway)."
-           #:requirement '(sway swaylock)
+;; 2. Top-level barrier: the complete user graphical session.
+;;    Its #:requirement pulls in every branch of the graph; Shepherd resolves
+;;    them in parallel where the DAG allows.
+(define sway-session
+  (service '(sway-session desktop graphical-session-user)
+           #:documentation
+           "Barrier: the complete user graphical session (dbus, audio,
+gpg-agent, sway, and all GUI daemons)."
+           #:requirement '(dbus pipewire gpg-agent sway graphical-session)
            #:start (const #t)
            #:stop (const #t)
            #:one-shot? #t))
 
-(register-services (list desktop))
+(register-services (list sway-session))
 
-;; `(shepherd service)` exports `start-in-the-background`, not a bare `start`.
-;; The background start returns immediately, so the user Shepherd socket is
-;; served right away (lets you `herd` the desktop manually if needed).
-(start-in-the-background '(desktop))
+;; 3. Kick off the session.
+;;    (shepherd service) exports start-in-the-background, not a bare start.
+;;    Resolves the graph and starts services concurrently where possible.
+(start-in-the-background '(sway-session))
