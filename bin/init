@@ -1,0 +1,5 @@
+#!/bin/sh
+exec /usr/sbin/s6-linux-init -v 1 -m 0022 \
+  -c /etc/s6-linux-init/current \
+  -p /usr/bin:/bin:/usr/sbin:/sbin \
+  -- "$@"
