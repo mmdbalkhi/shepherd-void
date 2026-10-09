@@ -71,13 +71,13 @@ mountpoint -q /var/cache || mount -t btrfs -o subvol=@cache,noatime   /dev/disk/
 SHEPHERD=/usr/local/bin/shepherd    # or /gnu/current-guix-profile/bin/shepherd
 [ -x "$SHEPHERD" ] || exec /sbin/agetty --noclear -a root tty1 linux
 mkdir -p /run/shepherd
-"$SHEPHERD" -c /etc/shepherd/config.scm -s /run/shepherd/socket \
+"$SHEPHERD" -c /etc/shepherd/init.scm -s /run/shepherd/socket \
             -l /var/log/shepherd.log -I
 #+END_SRC
 
 #+BEGIN_marginnote
 The generator writes =current/scripts/rc.init= from =skel/rc.init=.  Edit the
-=skel= copy and re-run =s6-linux-init-maker= — never patch =current= directly.
+=skel= copy and re-run =s6-linux-init-maker=. never patch =current= directly.
 #+END_marginnote
 
 
@@ -134,7 +134,6 @@ Boot DAG (what actually gates the gettys):
                  fully-online ─ network-manager ───┘
 
                    seatd · acpid · zram · ssh · chrony
-                         (float — do NOT gate login)
 #+END_EXAMPLE
 
 #+BEGIN_marginnote
@@ -176,7 +175,7 @@ Checklist:
 3. For daemons: argv list + =#:log-file= + =make-kill-destructor= + =#:respawn? #t=.
 4. For one-shots: use a pure Guile =(lambda _ (zero? (system* ...)))= or =~run-or-ignored~= + =#:one-shot? #t= + =#:stop (const #t)=.
 5. Wire it into a stage: edit the =#:requirement= of =interactive= or =fully-online='s =stage= in 28-boot-stages if it should be part of one.[fn:addto]
-6. Reload: =herd load config.scm=.  Shepherd restarts only what changed; already-running services are untouched.
+6. Reload: =herd load init.scm=.  Shepherd restarts only what changed; already-running services are untouched.
 
 ** Template for One-Shots (mkdir, swapon, sysctl, etc.):
 
@@ -218,7 +217,7 @@ Checklist:
 #+END_SRC
 
 To enable: =cp= the file into =/etc/shepherd/services.d/=, add =syncthing= to
-the =fully-online= =stage= requirements in =28-boot-stages.scm=, then =herd load config.scm=.
+the =fully-online= =stage= requirements in =28-boot-stages.scm=, then =herd load init.scm=.
 A new =syncthing= service appears in =herd status= with no
 Shepherd restart.[fn:syncthingurl]
 
@@ -231,11 +230,11 @@ the same service under =user-shepherd/services.d/= with =GUIX_PROFILE= set.
 
 * Runtime model (what you observe at boot)
 
-- =/etc/shepherd/config.scm= loads =services.d/*.scm=, then =(start-in-the-background '(fully-online))=.
+- =/etc/shepherd/init.scm= loads =services.d/*.scm=, then =(start-in-the-background '(fully-online))=.
 - Shepherd resolves requirements breadth-first and /starts them concurrently/ where the graph allows.[fn:par]
   You see interleaved =Starting service X= / =Service X has been started.= lines in =/var/log/shepherd.log=.
 - A service whose =#:start= throws is marked failed; dependents are skipped / retried, logged,
-  and the boot continues on other branches — one bad daemon never hangs the whole boot.[fn:fail]
+  and the boot continues on other branches. one bad daemon never hangs the whole boot.[fn:fail]
 - =boot-ready= is the barrier behind which gettys wait; =fully-online= is everything else that is allowed to lag.
 - On shutdown, services run their =#:stop= thunks in reverse-dependency order (e.g., =seedrng save=, =hwclock --systohc=, cleaning =/tmp=).
 #+BEGIN_SRC text :tangle no
@@ -262,7 +261,7 @@ Shepherd also exposes =herd = the CLI.  =herd help=, =herd doc <service>=, and
 #+BEGIN_SRC text :tangle no
 shepherd/
 ├── readme.org                    <- you are here
-├── config.scm                    <- Shepherd config entry point
+├── init.scm                    <- Shepherd config entry point
 ├── services.d/
 │   ├── 00-utilities.scm          <- shared helpers (mounted?, read-rc-conf-var)
 │   ├── 01-root.scm               <- root-rw remount
@@ -298,9 +297,23 @@ shepherd/
 │   └── 28-boot-stages.scm        <- boot-critical -> boot-ready -> interactive -> fully-online
 ├── s6-linux-init/
 │   └── skel/rc.init              <- stage-0 handoff (edit here)
-└── user-shepherd/                <- per-user Shepherd (sway etc.)       (WIP)
-    ├── config.scm
-    └── services.d/sway.scm
+├── user-shepherd
+│   ├── init.scm
+│   └── services.d
+│       ├── 00-utilities.scm
+│       ├── 01-runtime-dirs.scm
+│       ├── 02-dbus.scm
+│       ├── 03-pipewire.scm
+│       ├── 04-gpg-agent.scm
+│       ├── 05-sway.scm
+│       ├── 06-graphical-session.scm
+│       ├── 07-portals.scm
+│       ├── 08-dunst.scm
+│       ├── 09-swayidle.scm
+│       ├── 10-sway-audio-idle-inhibit.scm
+│       ├── 11-wlsunset.scm
+│       ├── 12-clipman.scm
+│       └── 13-azotebg.scm
 #+END_SRC
 
 * Install & bring up (manual)
@@ -308,7 +321,7 @@ shepherd/
 #+BEGIN_SRC sh :tangle no
 # 1. Shepherd config    ->    where rc.init expects it
 cp services.d/*.scm           /etc/shepherd/services.d/
-cp config.scm                 /etc/shepherd/config.scm
+cp init.scm                 /etc/shepherd/config.scm
 
 # 2. Shepherd binary visible to rc.init (one of:)
 ln -s $(guix build shepherd)/bin/shepherd /usr/local/bin/shepherd       # Guix
@@ -350,7 +363,7 @@ for a desktop session move it to =user-shepherd=, set =HOME= and =XDG_CONFIG_HOM
 [fn:syncthingurl] [[https://github.com/syncthing/syncthing/blob/main/README.md][syncthing/README]] · its systemd unit =network-online.target + local-fs.target=
 maps exactly to =network-manager + file-systems= here.
 
-[fn:par] =start-in-the-background= (from =services.d/config.scm=) spawns a fiber that calls
+[fn:par] =start-in-the-background= (from =services.d/init.scm=) spawns a fiber that calls
 =start-in-parallel=: each node's =#:requirement= starts first, and siblings with no edge
 between them start concurrently.  [[https://www.gnu.org/software/shepherd/manual/shepherd.html][Shepherd manual]] §"Dependency resolution".
 
