@@ -1,19 +1,27 @@
 ;;; 10-sysctl.scm --- apply sysctl settings.
-
 ;; sysctl is a boot-critical concern (networking knobs, fs limits), but it
 ;; does not gate login, so it is kept out of the ~boot-ready~ barrier and may
 ;; run in parallel with the TTYs being brought up.
+
+(use-modules (ice-9 ftw)     ;; scandir, file-is-directory?
+             (srfi srfi-13)  ;; string things
+             )
+
 
 (define sysctl
   (service '(sysctl)
            #:documentation "Load /etc/sysctl.conf and /etc/sysctl.d/*.conf."
            #:requirement '(root-rw sys file-systems)
-           #:start
-           (make-system-constructor ;; TODO: lispify
-            "for i in /etc/sysctl.d/*.conf /run/sysctl.d/*.conf /usr/lib/sysctl.d/*.conf; do
-        [ -e \"$i\" ] && sysctl -p \"$i\" >/dev/null 2>&1 || true
-      done
-      sysctl -p /etc/sysctl.conf >/dev/null 2>&1 || true")
+           #:start (lambda _
+                     (for-each (lambda (dir)
+                                 (when (file-is-directory? dir)
+                                   (for-each (lambda (f)
+                                               (system* "sysctl" "-p" (string-append dir "/" f)))
+                                             (scandir dir (lambda (f) (string-suffix? ".conf" f))))))
+                               '("/etc/sysctl.d" "/run/sysctl.d" "/usr/lib/sysctl.d"))
+                     (when (file-exists? "/etc/sysctl.conf")
+                       (system* "sysctl" "-p" "/etc/sysctl.conf"))
+                     #t)
            #:stop (const #t)
            #:one-shot? #t))
 
