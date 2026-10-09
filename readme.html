@@ -1,11 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 2026-10-09 Fri 19:26 -->
+<!-- 2026-10-09 Fri 22:59 -->
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>s6-linux-init + Shepherd boot configuration</title>
-<meta name="author" content="Komeil Parseh" />
 <meta name="description" content="Literary source of truth: how this host boots with s6 (stage 0 only) and GNU Shepherd." />
 <meta name="generator" content="Org Mode" />
 <link href="https://fonts.googleapis.com/css?family=IBM Plex Mono" rel="stylesheet">
@@ -975,14 +974,15 @@ mjx-container, .MathJax, .katex { margin: 0.6em 0; }
 <li><a href="#org99740b2">1. Introduction</a></li>
 <li><a href="#org035d307">2. The three layers</a></li>
 <li><a href="#org68c6d81">3. Shepherd&rsquo;s graph</a></li>
-<li><a href="#org3825dab">4. Add a service (template + worked example)</a>
+<li><a href="#org7b87646">4. Add a service (template + worked example)</a>
 <ul>
-<li><a href="#org92cd970">4.1. example: <i>syncthing</i> as a system service ():</a></li>
+<li><a href="#orgefdf570">4.1. Template for One-Shots (mkdir, swapon, sysctl, etc.):</a></li>
+<li><a href="#org1ff8332">4.2. example: <i>syncthing</i> as a system service ():</a></li>
 </ul>
 </li>
-<li><a href="#org7c02da5">5. Runtime model (what you observe at boot)</a></li>
-<li><a href="#org254302a">6. Layout</a></li>
-<li><a href="#orga34b9aa">7. Install &amp; bring up (manual)</a></li>
+<li><a href="#org254302a">5. Runtime model (what you observe at boot)</a></li>
+<li><a href="#org3c132fa">6. Layout</a></li>
+<li><a href="#orge12ec43">7. Install &amp; bring up (manual)</a></li>
 </ul>
 </div>
 </nav>
@@ -1095,15 +1095,24 @@ See info:(shepherd)Service Types and <code>services.d/28-boot-stages.scm</code>.
 </p>
 
 <div class="org-src-container">
-<pre class="src src-scheme"><code><span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">boot-critical</span>   '<span style="color: #B48EAD;">(</span>root-rw pseudo-filesystems runtime-dirs
-                          static-device-nodes kernel-modules cgroups udev
-                          udev-settle file-systems hostname log-files syslog
-                          sysctl random-seed dmesg swap guix-daemon<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
-<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">boot-ready</span>      '<span style="color: #B48EAD;">(</span>pseudo-filesystems cgroups udev udev-settle file-systems
-                          hostname runtime-directories log-files syslog random-seed<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
-<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">interactive</span>     '<span style="color: #B48EAD;">(</span>boot-ready agetty-tty1..6<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
-<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">fully-online</span>    '<span style="color: #B48EAD;">(</span>interactive loopback dbus polkit elogind seatd
-                          acpid network-manager zram openssh chrony<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+<pre class="src src-scheme"><code><span style="color: #6f7787;">;; </span><span style="color: #6f7787;">28-boot-stages.scm --- named barriers for the boot graph.
+</span>
+<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">boot-critical</span>
+  '<span style="color: #B48EAD;">(</span>root-rw pseudo-filesystems runtime-directories
+    static-device-nodes kernel-modules cgroups udev udev-settle
+    file-systems tmpfs swap sysctl dmesg guix-daemon<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+
+<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">boot-ready</span>
+  '<span style="color: #B48EAD;">(</span>boot-critical hostname log-files syslog random-seed
+    console-setup timezone hwclock<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+
+<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">interactive</span>
+  '<span style="color: #B48EAD;">(</span>boot-ready agetty-tty1 agetty-tty2 agetty-tty3
+    agetty-tty4 agetty-tty5 agetty-tty6<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+
+<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">fully-online</span>
+  '<span style="color: #B48EAD;">(</span>interactive loopback dbus polkit elogind seatd acpid
+    network-manager zram openssh chrony<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
 </code></pre>
 </div>
 
@@ -1148,8 +1157,8 @@ Udev (ArchWiki) covers the rules format.
 </div>
 </div>
 </section>
-<section id="outline-container-org3825dab" class="outline-2">
-<h2 id="org3825dab"><span class="section-number-2">4.</span> Add a service (template + worked example)</h2>
+<section id="outline-container-org7b87646" class="outline-2">
+<h2 id="org7b87646"><span class="section-number-2">4.</span> Add a service (template + worked example)</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 Every service is a <code>(service '(provides) #:requirement '(...) #:start ...)</code>.
@@ -1185,7 +1194,7 @@ Checklist:
 <li>Add the file (zero-padded <code>NN</code> sorts before 28-boot-stages).</li>
 <li>Pick <i>real</i> provides (a list of symbols; not a string, not a list-in-a-list) and the minimal <code>#:requirement</code>.</li>
 <li>For daemons: argv list + <code>#:log-file</code> + <code>make-kill-destructor</code> + <code>#:respawn? #t</code>.</li>
-<li>For one-shots (<code>mkdir</code>, <code>swapon</code>, <code>keygen</code>): <code>#:start</code> thunk/~run-or-ignored~ + <code>#:one-shot? #t</code> + <code>#:stop (const #t)</code>.</li>
+<li>For one-shots: use a pure Guile <code>(lambda _ (zero? (system* ...)))</code> or <code>~run-or-ignored~</code> + <code>#:one-shot? #t</code> + <code>#:stop (const #t)</code>.</li>
 <li>Wire it into a stage: edit the <code>#:requirement</code> of <code>interactive</code> or <code>fully-online</code>&rsquo;s <code>stage</code> in 28-boot-stages if it should be part of one.<label id='fnr.3' for='fnr-in.3.2178101' class='margin-toggle sidenote-number'><sup class='numeral'>3</sup></label><input type='checkbox' id='fnr-in.3.2178101' class='margin-toggle'><span class='sidenote'><sup class='numeral'>3</sup>
 The stage <code>#:requirement</code> list is the &ldquo;what must be up before X is considered up&rdquo; contract.
 Add your symbol there to make it part of an ordered phase; leave it out and it only starts if something
@@ -1194,13 +1203,34 @@ else pulls it in.
 <li>Reload: <code>herd load config.scm</code>.  Shepherd restarts only what changed; already-running services are untouched.</li>
 </ol>
 </div>
-<div id="outline-container-org92cd970" class="outline-3">
-<h3 id="org92cd970"><span class="section-number-3">4.1.</span> example: <i>syncthing</i> as a system service (<label id='fnr.4' for='fnr-in.4.9395905' class='margin-toggle sidenote-number'><sup class='numeral'>4</sup></label><input type='checkbox' id='fnr-in.4.9395905' class='margin-toggle'><span class='sidenote'><sup class='numeral'>4</sup>
+<div id="outline-container-orgefdf570" class="outline-3">
+<h3 id="orgefdf570"><span class="section-number-3">4.1.</span> Template for One-Shots (mkdir, swapon, sysctl, etc.):</h3>
+<div class="outline-text-3" id="text-4-1">
+<div class="org-src-container">
+<pre class="src src-scheme"><code><span style="color: #6f7787;">;;; </span><span style="color: #6f7787;">NN-name.scm --- one-shot setup task.
+</span>
+<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">name</span>
+  <span style="color: #B48EAD;">(</span>service '<span style="color: #A3BE8C;">(</span>name<span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:documentation</span> <span style="color: #A3BE8C;">"Human sentence."</span>
+    <span style="color: #81A1C1;">#:requirement</span> '<span style="color: #A3BE8C;">(</span>the-services-it-cannot-run-without<span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:start</span> <span style="color: #A3BE8C;">(</span><span style="color: #81A1C1;">lambda</span> _
+              <span style="color: #6f7787;">;; </span><span style="color: #6f7787;">Pure Guile: no shell scripts, no make-system-constructor
+</span>              <span style="color: #5D80AE;">(</span>zero? <span style="color: #8FBCBB;">(</span>system* <span style="color: #A3BE8C;">"command"</span> <span style="color: #A3BE8C;">"arg1"</span> <span style="color: #A3BE8C;">"arg2"</span><span style="color: #8FBCBB;">)</span><span style="color: #5D80AE;">)</span><span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:stop</span> <span style="color: #A3BE8C;">(</span>const #t<span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:one-shot?</span> #t<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+
+<span style="color: #81A1C1;">(</span>register-services <span style="color: #B48EAD;">(</span>list name<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+</code></pre>
+</div>
+</div>
+</div>
+<div id="outline-container-org1ff8332" class="outline-3">
+<h3 id="org1ff8332"><span class="section-number-3">4.2.</span> example: <i>syncthing</i> as a system service (<label id='fnr.4' for='fnr-in.4.2081195' class='margin-toggle sidenote-number'><sup class='numeral'>4</sup></label><input type='checkbox' id='fnr-in.4.2081195' class='margin-toggle'><span class='sidenote'><sup class='numeral'>4</sup>
 Syncthing is a fine <code>fully-online</code> citizen: network-bound, not login-critical,
 restart-on-crash via <code>#:respawn? #t</code>. The example intentionally uses the <code>system</code> instance;
 for a desktop session move it to <code>user-shepherd</code>, set <code>HOME</code> and <code>XDG_CONFIG_HOME</code>, and require <code>seatd</code>.
 </span>):</h3>
-<div class="outline-text-3" id="text-4-1">
+<div class="outline-text-3" id="text-4-2">
 <div class="org-src-container">
 <pre class="src src-scheme"><code><span style="color: #6f7787;">;;; </span><span style="color: #6f7787;">31-syncthing-example.scm --- Syncthing daemon
 </span>
@@ -1223,15 +1253,15 @@ for a desktop session move it to <code>user-shepherd</code>, set <code>HOME</cod
 
 <p>
 To enable: <code>cp</code> the file into <code>/etc/shepherd/services.d/</code>, add <code>syncthing</code> to
-the <code>fully-online</code> <code>stage</code> requirements in <code>28-boot-stages.scm</code>, then <code>herd
-load config.scm</code>.  A new <code>syncthing</code> service appears in <code>herd status</code> with no
-Shepherd restart.<label id='fnr.5' for='fnr-in.5.8122864' class='margin-toggle sidenote-number'><sup class='numeral'>5</sup></label><input type='checkbox' id='fnr-in.5.8122864' class='margin-toggle'><span class='sidenote'><sup class='numeral'>5</sup>
+the <code>fully-online</code> <code>stage</code> requirements in <code>28-boot-stages.scm</code>, then <code>herd load config.scm</code>.
+A new <code>syncthing</code> service appears in <code>herd status</code> with no
+Shepherd restart.<label id='fnr.5' for='fnr-in.5.5774974' class='margin-toggle sidenote-number'><sup class='numeral'>5</sup></label><input type='checkbox' id='fnr-in.5.5774974' class='margin-toggle'><span class='sidenote'><sup class='numeral'>5</sup>
 syncthing/README · its systemd unit <code>network-online.target + local-fs.target</code>
 maps exactly to <code>network-manager + file-systems</code> here.
 </span>
 </p>
 
-<label for='mn-auto.5774974' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.5774974' class='margin-toggle'><div class="marginnote" id="orga060e12">
+<label for='mn-auto.2185968' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.2185968' class='margin-toggle'><div class="marginnote" id="orgc3d7bc1">
 <p>
 Syncthing ships a systemd unit that does the same <code>network-online +
 filesystem</code> dance; this is the manual port.  For a per-user GUI session, put
@@ -1242,26 +1272,26 @@ the same service under <code>user-shepherd/services.d/</code> with <code>GUIX_PR
 </div>
 </div>
 </section>
-<section id="outline-container-org7c02da5" class="outline-2">
-<h2 id="org7c02da5"><span class="section-number-2">5.</span> Runtime model (what you observe at boot)</h2>
+<section id="outline-container-org254302a" class="outline-2">
+<h2 id="org254302a"><span class="section-number-2">5.</span> Runtime model (what you observe at boot)</h2>
 <div class="outline-text-2" id="text-5">
 <ul class="org-ul">
 <li><code>/etc/shepherd/config.scm</code> loads <code>services.d/*.scm</code>, then <code>(start-in-the-background '(fully-online))</code>.</li>
-<li>Shepherd resolves requirements breadth-first and <i>starts them concurrently</i> where the graph allows.<label id='fnr.6' for='fnr-in.6.8898226' class='margin-toggle sidenote-number'><sup class='numeral'>6</sup></label><input type='checkbox' id='fnr-in.6.8898226' class='margin-toggle'><span class='sidenote'><sup class='numeral'>6</sup>
+<li>Shepherd resolves requirements breadth-first and <i>starts them concurrently</i> where the graph allows.<label id='fnr.6' for='fnr-in.6.3714063' class='margin-toggle sidenote-number'><sup class='numeral'>6</sup></label><input type='checkbox' id='fnr-in.6.3714063' class='margin-toggle'><span class='sidenote'><sup class='numeral'>6</sup>
 <code>start-in-the-background</code> (from <code>services.d/config.scm</code>) spawns a fiber that calls
 <code>start-in-parallel</code>: each node&rsquo;s <code>#:requirement</code> starts first, and siblings with no edge
 between them start concurrently.  Shepherd manual §&ldquo;Dependency resolution&rdquo;.
 </span>
 You see interleaved <code>Starting service X</code> / <code>Service X has been started.</code> lines in <code>/var/log/shepherd.log</code>.</li>
 <li>A service whose <code>#:start</code> throws is marked failed; dependents are skipped / retried, logged,
-and the boot continues on other branches — one bad daemon never hangs the whole boot.<label id='fnr.7' for='fnr-in.7.4671430' class='margin-toggle sidenote-number'><sup class='numeral'>7</sup></label><input type='checkbox' id='fnr-in.7.4671430' class='margin-toggle'><span class='sidenote'><sup class='numeral'>7</sup>
+and the boot continues on other branches — one bad daemon never hangs the whole boot.<label id='fnr.7' for='fnr-in.7.7916592' class='margin-toggle sidenote-number'><sup class='numeral'>7</sup></label><input type='checkbox' id='fnr-in.7.7916592' class='margin-toggle'><span class='sidenote'><sup class='numeral'>7</sup>
 Failures are per-service. Shepherd logs <code>Exception caught while starting X</code> to
 <code>/var/log/shepherd.log</code>, marks the service failed, and continues other branches rather than
 aborting the boot.  That is intentional: a one-shot <code>random-seed</code> failing must not stop <code>udev</code>.
 </span></li>
 <li><code>boot-ready</code> is the barrier behind which gettys wait; <code>fully-online</code> is everything else that is allowed to lag.</li>
+<li>On shutdown, services run their <code>#:stop</code> thunks in reverse-dependency order (e.g., <code>seedrng save</code>, <code>hwclock --systohc</code>, cleaning <code>/tmp</code>).</li>
 </ul>
-
 <div class="org-src-container">
 <pre class="src src-text"><code>$ herd status                   # on the running machine
 root                            (running)   uptime 00:00:47
@@ -1276,7 +1306,7 @@ $ tail -f /var/log/shepherd.log  # the spinner feeds this
 </code></pre>
 </div>
 
-<label for='mn-auto.434429' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.434429' class='margin-toggle'><div class="marginnote" id="org8ea3830">
+<label for='mn-auto.5341081' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.5341081' class='margin-toggle'><div class="marginnote" id="org7c02da5">
 <p>
 Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &lt;service&gt;</code>, and
 <code>[[info:(shepherd)Invoking shepherd][info:(shepherd)]]</code> cover every flag.
@@ -1285,42 +1315,46 @@ Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &
 </div>
 </div>
 </section>
-<section id="outline-container-org254302a" class="outline-2">
-<h2 id="org254302a"><span class="section-number-2">6.</span> Layout</h2>
+<section id="outline-container-org3c132fa" class="outline-2">
+<h2 id="org3c132fa"><span class="section-number-2">6.</span> Layout</h2>
 <div class="outline-text-2" id="text-6">
 <div class="org-src-container">
 <pre class="src src-text"><code>shepherd/
 &#9500;&#9472;&#9472; readme.org                    &lt;- you are here
 &#9500;&#9472;&#9472; config.scm                    &lt;- Shepherd config entry point
 &#9500;&#9472;&#9472; services.d/
-&#9474;   &#9500;&#9472;&#9472; 00-utilities.scm          &lt;- shared helpers (no services)
+&#9474;   &#9500;&#9472;&#9472; 00-utilities.scm          &lt;- shared helpers (mounted?, read-rc-conf-var)
 &#9474;   &#9500;&#9472;&#9472; 01-root.scm               &lt;- root-rw remount
 &#9474;   &#9500;&#9472;&#9472; 02-pseudo-fs.scm          &lt;- proc/sys/run/dev/+
-&#9474;   &#9500;&#9472;&#9472; 03-runtime-directories.scm
+&#9474;   &#9500;&#9472;&#9472; 02-tmpfs.scm              &lt;- mount /tmp as tmpfs
+&#9474;   &#9500;&#9472;&#9472; 03-runtime.scm            &lt;- early runtime directories
+&#9474;   &#9500;&#9472;&#9472; 03-console.scm            &lt;- KEYMAP/FONT from /etc/rc.conf
 &#9474;   &#9500;&#9472;&#9472; 04-cgroups.scm            &lt;- unified | hybrid | legacy
 &#9474;   &#9500;&#9472;&#9472; 05-static-devnodes.scm
+&#9474;   &#9500;&#9472;&#9472; 06-kernel-modules.scm
 &#9474;   &#9500;&#9472;&#9472; 07-udev.scm               &lt;- udev + udev-settle
-&#9474;   &#9500;&#9472;&#9472; 08-file-systems.scm       &lt;- mount -a + swap
+&#9474;   &#9500;&#9472;&#9472; 08-file-systems.scm       &lt;- mount -a
 &#9474;   &#9500;&#9472;&#9472; 09-hostname.scm
 &#9474;   &#9500;&#9472;&#9472; 10-sysctl.scm
-&#9474;   &#9500;&#9472;&#9472; 11-swap.scm
+&#9474;   &#9500;&#9472;&#9472; 10-timezone.scm           &lt;- /etc/localtime symlink
+&#9474;   &#9500;&#9472;&#9472; 11-hwclock.scm            &lt;- RTC sync on boot/shutdown
 &#9474;   &#9500;&#9472;&#9472; 12-dmesg.scm
-&#9474;   &#9500;&#9472;&#9472; 13-random-seed.scm        &lt;- seedrng
-&#9474;   &#9500;&#9472;&#9472; 14-log-files.scm
+&#9474;   &#9500;&#9472;&#9472; 13-random-seed.scm        &lt;- seedrng (now saves on shutdown)
+&#9474;   &#9500;&#9472;&#9472; 14-log-files.scm          &lt;- utmp/wtmp + socklog spool
 &#9474;   &#9500;&#9472;&#9472; 15-syslog.scm             &lt;- socklog -&gt; /dev/log
 &#9474;   &#9500;&#9472;&#9472; 16-guix-daemon.scm
-&#9474;   &#9500;&#9472;&#9472; 17-getty.scm              &lt;- agetty-tty1..6
+&#9474;   &#9500;&#9472;&#9472; 17-getty.scm              &lt;- agetty-tty1..6 (--skip-login, --noissue)
 &#9474;   &#9500;&#9472;&#9472; 18-loopback.scm
 &#9474;   &#9500;&#9472;&#9472; 19-dbus.scm               &lt;- dbus + dbus-runtime dir
-&#9474;   &#9500;&#9472;&#9472; 20-network.scm            &lt;- NetworkManager (dhcpcd opt-in)
+&#9474;   &#9500;&#9472;&#9472; 20-network.scm            &lt;- NetworkManager
 &#9474;   &#9500;&#9472;&#9472; 21-polkit.scm
 &#9474;   &#9500;&#9472;&#9472; 22-elogind.scm            &lt;- D-Bus-activated, one-shot pin
 &#9474;   &#9500;&#9472;&#9472; 23-seatd.scm
 &#9474;   &#9500;&#9472;&#9472; 24-acpid.scm
-&#9474;   &#9500;&#9472;&#9472; 25-zram.scm
+&#9474;   &#9500;&#9472;&#9472; 25-zram.scm               &lt;- zram swap (pure Guile sysfs writes)
 &#9474;   &#9500;&#9472;&#9472; 26-openssh.scm
 &#9474;   &#9500;&#9472;&#9472; 27-chrony.scm
-&#9474;   &#9492;&#9472;&#9472; 28-boot-stages.scm        &lt;- boot-ready/interactive/fully-online
+&#9474;   &#9492;&#9472;&#9472; 28-boot-stages.scm        &lt;- boot-critical -&gt; boot-ready -&gt; interactive -&gt; fully-online
 &#9500;&#9472;&#9472; s6-linux-init/
 &#9474;   &#9492;&#9472;&#9472; skel/rc.init              &lt;- stage-0 handoff (edit here)
 &#9492;&#9472;&#9472; user-shepherd/                &lt;- per-user Shepherd (sway etc.)       (WIP)
@@ -1330,8 +1364,8 @@ Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &
 </div>
 </div>
 </section>
-<section id="outline-container-orga34b9aa" class="outline-2">
-<h2 id="orga34b9aa"><span class="section-number-2">7.</span> Install &amp; bring up (manual)</h2>
+<section id="outline-container-orge12ec43" class="outline-2">
+<h2 id="orge12ec43"><span class="section-number-2">7.</span> Install &amp; bring up (manual)</h2>
 <div class="outline-text-2" id="text-7">
 <div class="org-src-container">
 <pre class="src src-sh"><code><span style="color: #6f7787;"># </span><span style="color: #6f7787;">1. Shepherd config    -&gt;    where rc.init expects it
@@ -1353,7 +1387,7 @@ Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &
 </code></pre>
 </div>
 
-<label for='mn-auto.7569396' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.7569396' class='margin-toggle'><div class="marginnote" id="org77d42f8">
+<label for='mn-auto.111200' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.111200' class='margin-toggle'><div class="marginnote" id="orga34b9aa">
 <p>
 <code>guix build shepherd</code> resolves to the store path of Shepherd; the symlink keeps
 <code>/usr/local/bin/shepherd</code> stable across profile generations.  <code>guix build</code>
@@ -1365,8 +1399,7 @@ Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &
 </article>
 <footer id="postamble" class="status">
 <p class="date">Date: 2026-10-09 Fri 00:00</p>
-<p class="author">Author: Komeil Parseh</p>
-<p class="date">Created: 2026-10-09 Fri 19:26</p>
+<p class="date">Created: 2026-10-09 Fri 22:59</p>
 </footer>
 </body>
 </html>

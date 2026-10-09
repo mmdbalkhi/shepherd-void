@@ -3,10 +3,9 @@
 #+EMAIL:     komeilparseh@disroot.org
 #+date: <2026-10-09 Fri>
 #+DESCRIPTION:  Literary source of truth: how this host boots with s6 (stage 0 only) and GNU Shepherd.
-#+OPTIONS:    toc:nil num:nil author:nil e:t
 #+LICENSE: CC0 1.0
 #+language: en
-#+OPTIONS: toc:3 author:t timestamp:t num:t tags:nil
+#+OPTIONS: toc:3 author:t timestamp:t num:f tags:nil e:t author:nil
 #+STARTUP: content indent showall
 #+LANGUAGE:   en
 #+PROPERTY:   header-args:sh      :tangle no
@@ -91,15 +90,24 @@ resolves and runs the whole graph in parallel.
 The targets live in =services.d/28-boot-stages.scm= [fn:stages]
 
 #+BEGIN_SRC scheme :tangle no
-(define boot-critical   '(root-rw pseudo-filesystems runtime-dirs
-                          static-device-nodes kernel-modules cgroups udev
-                          udev-settle file-systems hostname log-files syslog
-                          sysctl random-seed dmesg swap guix-daemon))
-(define boot-ready      '(pseudo-filesystems cgroups udev udev-settle file-systems
-                          hostname runtime-directories log-files syslog random-seed))
-(define interactive     '(boot-ready agetty-tty1..6))
-(define fully-online    '(interactive loopback dbus polkit elogind seatd
-                          acpid network-manager zram openssh chrony))
+;; 28-boot-stages.scm --- named barriers for the boot graph.
+
+(define boot-critical
+  '(root-rw pseudo-filesystems runtime-directories
+    static-device-nodes kernel-modules cgroups udev udev-settle
+    file-systems tmpfs swap sysctl dmesg guix-daemon))
+
+(define boot-ready
+  '(boot-critical hostname log-files syslog random-seed
+    console-setup timezone hwclock))
+
+(define interactive
+  '(boot-ready agetty-tty1 agetty-tty2 agetty-tty3
+    agetty-tty4 agetty-tty5 agetty-tty6))
+
+(define fully-online
+  '(interactive loopback dbus polkit elogind seatd acpid
+    network-manager zram openssh chrony))
 #+END_SRC
 
 Boot DAG (what actually gates the gettys):
@@ -166,9 +174,27 @@ Checklist:
 1. Add the file (zero-padded =NN= sorts before 28-boot-stages).
 2. Pick /real/ provides (a list of symbols; not a string, not a list-in-a-list) and the minimal =#:requirement=.
 3. For daemons: argv list + =#:log-file= + =make-kill-destructor= + =#:respawn? #t=.
-4. For one-shots (=mkdir=, =swapon=, =keygen=): =#:start= thunk/~run-or-ignored~ + =#:one-shot? #t= + =#:stop (const #t)=.
+4. For one-shots: use a pure Guile =(lambda _ (zero? (system* ...)))= or =~run-or-ignored~= + =#:one-shot? #t= + =#:stop (const #t)=.
 5. Wire it into a stage: edit the =#:requirement= of =interactive= or =fully-online='s =stage= in 28-boot-stages if it should be part of one.[fn:addto]
 6. Reload: =herd load config.scm=.  Shepherd restarts only what changed; already-running services are untouched.
+
+** Template for One-Shots (mkdir, swapon, sysctl, etc.):
+
+#+BEGIN_SRC scheme :tangle no
+;;; NN-name.scm --- one-shot setup task.
+
+(define name
+  (service '(name)
+    #:documentation "Human sentence."
+    #:requirement '(the-services-it-cannot-run-without)
+    #:start (lambda _
+              ;; Pure Guile: no shell scripts, no make-system-constructor
+              (zero? (system* "command" "arg1" "arg2")))
+    #:stop (const #t)
+    #:one-shot? #t))
+
+(register-services (list name))
+#+END_SRC
 
 ** example: /syncthing/ as a system service ([fn:syncthing]):
 
@@ -211,7 +237,7 @@ the same service under =user-shepherd/services.d/= with =GUIX_PROFILE= set.
 - A service whose =#:start= throws is marked failed; dependents are skipped / retried, logged,
   and the boot continues on other branches — one bad daemon never hangs the whole boot.[fn:fail]
 - =boot-ready= is the barrier behind which gettys wait; =fully-online= is everything else that is allowed to lag.
-
+- On shutdown, services run their =#:stop= thunks in reverse-dependency order (e.g., =seedrng save=, =hwclock --systohc=, cleaning =/tmp=).
 #+BEGIN_SRC text :tangle no
 $ herd status                   # on the running machine
 root                            (running)   uptime 00:00:47
@@ -238,41 +264,44 @@ shepherd/
 ├── readme.org                    <- you are here
 ├── config.scm                    <- Shepherd config entry point
 ├── services.d/
-│   ├── 00-utilities.scm          <- shared helpers (no services)
+│   ├── 00-utilities.scm          <- shared helpers (mounted?, read-rc-conf-var)
 │   ├── 01-root.scm               <- root-rw remount
 │   ├── 02-pseudo-fs.scm          <- proc/sys/run/dev/+
-│   ├── 03-runtime-directories.scm
+│   ├── 02-tmpfs.scm              <- mount /tmp as tmpfs
+│   ├── 03-runtime.scm            <- early runtime directories
+│   ├── 03-console.scm            <- KEYMAP/FONT from /etc/rc.conf
 │   ├── 04-cgroups.scm            <- unified | hybrid | legacy
 │   ├── 05-static-devnodes.scm
+│   ├── 06-kernel-modules.scm
 │   ├── 07-udev.scm               <- udev + udev-settle
-│   ├── 08-file-systems.scm       <- mount -a + swap
+│   ├── 08-file-systems.scm       <- mount -a
 │   ├── 09-hostname.scm
 │   ├── 10-sysctl.scm
-│   ├── 11-swap.scm
+│   ├── 10-timezone.scm           <- /etc/localtime symlink
+│   ├── 11-hwclock.scm            <- RTC sync on boot/shutdown
 │   ├── 12-dmesg.scm
-│   ├── 13-random-seed.scm        <- seedrng
-│   ├── 14-log-files.scm
+│   ├── 13-random-seed.scm        <- seedrng (now saves on shutdown)
+│   ├── 14-log-files.scm          <- utmp/wtmp + socklog spool
 │   ├── 15-syslog.scm             <- socklog -> /dev/log
 │   ├── 16-guix-daemon.scm
-│   ├── 17-getty.scm              <- agetty-tty1..6
+│   ├── 17-getty.scm              <- agetty-tty1..6 (--skip-login, --noissue)
 │   ├── 18-loopback.scm
 │   ├── 19-dbus.scm               <- dbus + dbus-runtime dir
-│   ├── 20-network.scm            <- NetworkManager (dhcpcd opt-in)
+│   ├── 20-network.scm            <- NetworkManager
 │   ├── 21-polkit.scm
 │   ├── 22-elogind.scm            <- D-Bus-activated, one-shot pin
 │   ├── 23-seatd.scm
 │   ├── 24-acpid.scm
-│   ├── 25-zram.scm
+│   ├── 25-zram.scm               <- zram swap (pure Guile sysfs writes)
 │   ├── 26-openssh.scm
 │   ├── 27-chrony.scm
-│   └── 28-boot-stages.scm        <- boot-ready/interactive/fully-online
+│   └── 28-boot-stages.scm        <- boot-critical -> boot-ready -> interactive -> fully-online
 ├── s6-linux-init/
 │   └── skel/rc.init              <- stage-0 handoff (edit here)
 └── user-shepherd/                <- per-user Shepherd (sway etc.)       (WIP)
     ├── config.scm
     └── services.d/sway.scm
-#+end_src
-
+#+END_SRC
 
 * Install & bring up (manual)
 
