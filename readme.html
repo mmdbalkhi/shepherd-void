@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- 2026-10-09 Fri 19:26 -->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>s6-linux-init + Shepherd boot configuration</title>
+<meta name="author" content="Komeil Parseh" />
+<meta name="description" content="Literary source of truth: how this host boots with s6 (stage 0 only) and GNU Shepherd." />
+<meta name="generator" content="Org Mode" />
+<link href="https://fonts.googleapis.com/css?family=IBM Plex Mono" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css?family=IBM Plex Sans" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css?family=IBM Plex Serif" rel="stylesheet">
+<style type="text/css">
+/* ===== tufte.css ===== */
+@charset "UTF-8";
+
+/* Import ET Book styles
+   adapted from https://github.com/edwardtufte/et-book/blob/gh-pages/et-book.css */
+
+@font-face {
+    font-family: "et-book";
+    src: url("et-book/et-book-roman-line-figures/et-book-roman-line-figures.eot");
+    src: url("et-book/et-book-roman-line-figures/et-book-roman-line-figures.eot?#iefix") format("embedded-opentype"), url("et-book/et-book-roman-line-figures/et-book-roman-line-figures.woff") format("woff"), url("et-book/et-book-roman-line-figures/et-book-roman-line-figures.ttf") format("truetype"), url("et-book/et-book-roman-line-figures/et-book-roman-line-figures.svg#etbookromanosf") format("svg");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "et-book";
+    src: url("et-book/et-book-display-italic-old-style-figures/et-book-display-italic-old-style-figures.eot");
+    src: url("et-book/et-book-display-italic-old-style-figures/et-book-display-italic-old-style-figures.eot?#iefix") format("embedded-opentype"), url("et-book/et-book-display-italic-old-style-figures/et-book-display-italic-old-style-figures.woff") format("woff"), url("et-book/et-book-display-italic-old-style-figures/et-book-display-italic-old-style-figures.ttf") format("truetype"), url("et-book/et-book-display-italic-old-style-figures/et-book-display-italic-old-style-figures.svg#etbookromanosf") format("svg");
+    font-weight: normal;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "et-book";
+    src: url("et-book/et-book-bold-line-figures/et-book-bold-line-figures.eot");
+    src: url("et-book/et-book-bold-line-figures/et-book-bold-line-figures.eot?#iefix") format("embedded-opentype"), url("et-book/et-book-bold-line-figures/et-book-bold-line-figures.woff") format("woff"), url("et-book/et-book-bold-line-figures/et-book-bold-line-figures.ttf") format("truetype"), url("et-book/et-book-bold-line-figures/et-book-bold-line-figures.svg#etbookromanosf") format("svg");
+    font-weight: bold;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "et-book-roman-old-style";
+    src: url("et-book/et-book-roman-old-style-figures/et-book-roman-old-style-figures.eot");
+    src: url("et-book/et-book-roman-old-style-figures/et-book-roman-old-style-figures.eot?#iefix") format("embedded-opentype"), url("et-book/et-book-roman-old-style-figures/et-book-roman-old-style-figures.woff") format("woff"), url("et-book/et-book-roman-old-style-figures/et-book-roman-old-style-figures.ttf") format("truetype"), url("et-book/et-book-roman-old-style-figures/et-book-roman-old-style-figures.svg#etbookromanosf") format("svg");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* Tufte CSS styles */
+html {
+    font-size: 15px;
+}
+
+body {
+    width: 87.5%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 12.5%;
+    font-family: et-book, Palatino, "Palatino Linotype", "Palatino LT STD", "Book Antiqua", Georgia, serif;
+    background-color: #fffff8;
+    color: #111;
+    max-width: 1400px;
+    counter-reset: sidenote-counter;
+}
+
+/* Adds dark mode */
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #151515;
+        color: #ddd;
+    }
+}
+
+h1 {
+    font-weight: 400;
+    margin-top: 4rem;
+    margin-bottom: 1.5rem;
+    font-size: 3.2rem;
+    line-height: 1;
+}
+
+h2 {
+    font-style: italic;
+    font-weight: 400;
+    margin-top: 2.1rem;
+    margin-bottom: 1.4rem;
+    font-size: 2.2rem;
+    line-height: 1;
+}
+
+h3 {
+    font-style: italic;
+    font-weight: 400;
+    font-size: 1.7rem;
+    margin-top: 2rem;
+    margin-bottom: 1.4rem;
+    line-height: 1;
+}
+
+hr {
+    display: block;
+    height: 1px;
+    width: 55%;
+    border: 0;
+    border-top: 1px solid #ccc;
+    margin: 1em 0;
+    padding: 0;
+}
+
+p.subtitle {
+    font-style: italic;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    font-size: 1.8rem;
+    display: block;
+    line-height: 1;
+}
+
+.numeral {
+    font-family: et-book-roman-old-style;
+}
+
+.danger {
+    color: red;
+}
+
+article {
+    padding: 5rem 0rem;
+}
+
+section {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+
+p,
+dl,
+ol,
+ul {
+    font-size: 1.4rem;
+    line-height: 2rem;
+}
+
+p {
+    margin-top: 1.4rem;
+    margin-bottom: 1.4rem;
+    padding-right: 0;
+    vertical-align: baseline;
+}
+
+sup {
+    line-height: 0;
+}
+
+/* Chapter Epigraphs */
+div.epigraph {
+    margin: 5em 0;
+}
+
+div.epigraph > blockquote {
+    margin-top: 3em;
+    margin-bottom: 3em;
+}
+
+div.epigraph > blockquote,
+div.epigraph > blockquote > p {
+    font-style: italic;
+}
+
+div.epigraph > blockquote > footer {
+    font-style: normal;
+}
+
+div.epigraph > blockquote > footer > cite {
+    font-style: italic;
+}
+/* end chapter epigraphs styles */
+
+blockquote {
+    font-size: 1.4rem;
+}
+
+blockquote p {
+    width: 55%;
+    margin-right: 40px;
+}
+
+blockquote footer {
+    width: 55%;
+    font-size: 1.1rem;
+    text-align: right;
+}
+
+section > p,
+section > footer,
+section > table {
+    width: 55%;
+}
+
+/* 50 + 5 == 55, to be the same width as paragraph */
+section > dl,
+section > ol,
+section > ul {
+    width: 50%;
+    -webkit-padding-start: 5%;
+}
+
+dt:not(:first-child),
+li:not(:first-child) {
+    margin-top: 0.25rem;
+}
+
+figure {
+    padding: 0;
+    border: 0;
+    font-size: 100%;
+    font: inherit;
+    vertical-align: baseline;
+    max-width: 55%;
+    -webkit-margin-start: 0;
+    -webkit-margin-end: 0;
+    margin: 0 0 3em 0;
+}
+
+figcaption {
+    float: right;
+    clear: right;
+    margin-top: 0;
+    margin-bottom: 0;
+    font-size: 1.1rem;
+    line-height: 1.6;
+    vertical-align: baseline;
+    position: relative;
+    max-width: 40%;
+}
+
+figure.fullwidth figcaption {
+    margin-right: 24%;
+}
+
+a:link,
+a:visited {
+    color: inherit;
+    text-underline-offset: 0.1em;
+    text-decoration-thickness: 0.05em;
+}
+
+/* Sidenotes, margin notes, figures, captions */
+img {
+    max-width: 100%;
+    height: auto;
+}
+
+figure.fullwidth img {
+    width: 100%;
+}
+
+.sidenote,
+.marginnote {
+    float: right;
+    clear: right;
+    margin-right: -60%;
+    width: 50%;
+    margin-top: 0.3rem;
+    margin-bottom: 0;
+    font-size: 1.1rem;
+    line-height: 1.3;
+    vertical-align: baseline;
+    position: relative;
+}
+
+.sidenote-number {
+    counter-increment: sidenote-counter;
+}
+
+.sidenote-number:after,
+.sidenote:before {
+    font-family: et-book-roman-old-style;
+    position: relative;
+    vertical-align: baseline;
+}
+
+.sidenote-number:after {
+    content: counter(sidenote-counter);
+    font-size: 1rem;
+    top: -0.5rem;
+    left: 0.1rem;
+}
+
+.sidenote:before {
+    content: counter(sidenote-counter) " ";
+    font-size: 1rem;
+    top: -0.5rem;
+}
+
+blockquote .sidenote,
+blockquote .marginnote {
+    margin-right: -82%;
+    min-width: 59%;
+    text-align: left;
+}
+
+div.fullwidth,
+table.fullwidth {
+    width: 100%;
+}
+
+div.table-wrapper {
+    overflow-x: auto;
+    font-family: "Trebuchet MS", "Gill Sans", "Gill Sans MT", sans-serif;
+}
+
+.sans {
+    font-family: "Gill Sans", "Gill Sans MT", Calibri, sans-serif;
+    letter-spacing: .03em;
+}
+
+code, pre > code {
+    font-family: Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 1.0rem;
+    line-height: 1.42;
+    -webkit-text-size-adjust: 100%; /* Prevent adjustments of font size after orientation changes in iOS. See https://github.com/edwardtufte/tufte-css/issues/81#issuecomment-261953409 */
+}
+
+.sans > code {
+    font-size: 1.2rem;
+}
+
+h1 > code,
+h2 > code,
+h3 > code {
+    font-size: 0.80em;
+}
+
+.marginnote > code,
+.sidenote > code {
+    font-size: 1rem;
+}
+
+pre > code {
+    font-size: 0.9rem;
+    width: 52.5%;
+    margin-left: 2.5%;
+    overflow-x: auto;
+    display: block;
+}
+
+pre.fullwidth > code {
+    width: 90%;
+}
+
+.fullwidth {
+    max-width: 90%;
+    clear:both;
+}
+
+span.newthought {
+    font-variant: small-caps;
+    font-size: 1.2em;
+}
+
+input.margin-toggle {
+    display: none;
+}
+
+label.sidenote-number {
+    display: inline-block;
+    max-height: 2rem; /* should be less than or equal to paragraph line-height */
+}
+
+label.margin-toggle:not(.sidenote-number) {
+    display: none;
+}
+
+.iframe-wrapper {
+    position: relative;
+    padding-bottom: 56.25%; /* 16:9 */
+    padding-top: 25px;
+    height: 0;
+}
+
+.iframe-wrapper iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+@media (max-width: 760px) {
+    body {
+        width: 84%;
+        padding-left: 8%;
+        padding-right: 8%;
+    }
+
+    hr,
+    section > p,
+    section > footer,
+    section > table {
+        width: 100%;
+    }
+
+    pre > code {
+        width: 97%;
+    }
+
+    section > dl,
+    section > ol,
+    section > ul {
+        width: 90%;
+    }
+
+    figure {
+        max-width: 90%;
+    }
+
+    figcaption,
+    figure.fullwidth figcaption {
+        margin-right: 0%;
+        max-width: none;
+    }
+
+    blockquote {
+        margin-left: 1.5em;
+        margin-right: 0em;
+    }
+
+    blockquote p,
+    blockquote footer {
+        width: 100%;
+    }
+
+    label.margin-toggle:not(.sidenote-number) {
+        display: inline;
+    }
+
+    .sidenote,
+    .marginnote {
+        display: none;
+    }
+
+    .margin-toggle:checked + .sidenote,
+    .margin-toggle:checked + .marginnote {
+        display: block;
+        float: left;
+        left: 1rem;
+        clear: both;
+        width: 95%;
+        margin: 1rem 2.5%;
+        vertical-align: baseline;
+        position: relative;
+    }
+
+    label {
+        cursor: pointer;
+    }
+
+    div.table-wrapper,
+    table {
+        width: 85%;
+    }
+
+    img {
+        width: 100%;
+    }
+}
+
+
+/* ===== ox-tufte.css ===== */
+:root {
+    --ox-tufte-content-width: 55%; /* set value consistent with "section > p" */
+    --ox-tufte-fullwidth: 163.636%; /* 90% of body, when ancestor is at 55% */
+    --ox-tufte-src-code-width: 97%;
+    /* 50+5=55% this is what is used by section > {dl, ol, ul} */
+    --ox-tufte-list-width: 50%;
+    --ox-tufte-list-padding-left: 5%;
+    /* font-size and line-height settings from tufte.css */
+    --ox-tufte-content-font-size: 1.4rem;
+    --ox-tufte-content-line-height: 2rem;
+    --ox-tufte-content-epigraph-margin-vertical: calc(5em / 1.4);
+    /* ^ equivalent of 5em when element has 1rem font-size */
+    --ox-tufte-note-line-height: 1.3;
+    --ox-tufte-note-font-size: 1.1rem;
+    --ox-tufte-note-code-font-size: 1rem;
+    --ox-tufte-code-font-family: Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    --ox-tufte-code-font-size: 1.0rem;
+    --ox-tufte-code-font-size-sans: 1.2rem; /* from ".sans > code" */
+    --ox-tufte-code-line-height: 1.42;
+    /* values tufte.css reuses for h1,h3,h3 */
+    --ox-tufte-heading-font-style: italic;
+    --ox-tufte-heading-font-weight: 400;
+    --ox-tufte-heading-line-height: 1;
+    --ox-tufte-heading-code-font-size: 0.80em;
+    --ox-tufte-heading-min-margin-bottom: 1.4rem; /* h3=1.4rem; p=1.4rem; */
+    --ox-tufte-heading-min-font-size: 1.4rem; /* p=1.4rem; */
+}
+
+/* 1. Prevent adjustments of font size after orientation changes in iOS. */
+/*    <https://github.com/necolas/normalize.css/blob/fc091cce1534909334c1911709a39c22d406977b/normalize.css#L13> */
+html {
+    -webkit-text-size-adjust: 100%; /* 1 */
+}
+
+/**************************************************************************/
+/* re-specify tufte.css values, for compatibility with org-generated html */
+/**************************************************************************/
+article { /* add missing default from tufte.css */
+    font-size: var(--ox-tufte-content-font-size);
+    line-height: var(--ox-tufte-content-line-height);
+}
+article > p,
+article > div.epigraph,
+article > table,
+article > mjx-container,
+article > div.zeroth-section,
+section > div,
+section > h2 { /* set value consistent with "section > p" */
+    width: var(--ox-tufte-content-width);
+}
+article > object {
+    max-width: var(--ox-tufte-content-width);
+}
+article figure object {
+    max-width: 100%;
+}
+article > p .fullwidth,
+article > div .fullwidth,
+section > div .fullwidth {
+    max-width: var(--ox-tufte-fullwidth);
+    width: max-content;
+}
+article > blockquote.fullwidth {
+    width: max-content;
+}
+@media (max-width: 760px) {
+    div.epigraph > blockquote.fullwidth {
+        width: unset;
+    }
+}
+section > dl, section > ol, section > ul,
+article > dl, article > ol, article > ul {
+    width: var(--ox-tufte-list-width);
+    /* instead of tufte.css's -webkit-padding-start, which doesn't work */
+    padding-inline-start: var(--ox-tufte-list-padding-left);
+}
+blockquote .marginnote, blockquote .sidenote {
+    font-style: normal;
+}
+/* code blocks. tufte.css also allows for code within headers and
+ * sidenotes/marginnotes. these are currently not supported by us. */
+.org-src-container {
+    max-width: var(--ox-tufte-fullwidth);
+    width: var(--ox-tufte-fullwidth);
+    clear: both; /* necessary to prevent overlap between long label and sidenote */
+}
+body pre { /* monospace content: .src .example */
+    /* FROM: pre.fullwidth > code in tufte.css; but adjusted */
+    width: var(--ox-tufte-src-code-width);
+    clear: both; /* ensure that it doesn't overlap sidenotes */
+    /* unset some unnecessary 'org' defaults, which interfere with tufte */
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: auto;
+    margin-right: 0;
+}
+pre, code {
+    /* FROM: "code, pre > code" in tufte.css */
+    font-family: var(--ox-tufte-code-font-family);
+    font-size: var(--ox-tufte-code-font-size);
+    line-height: var(--ox-tufte-code-line-height);
+}
+.sans pre, .sans code {
+    font-size: var(--ox-tufte-code-font-size-sans);
+    line-height: var(--ox-tufte-code-line-height);
+}
+.sans h1 code, .sans h2 code, .sans h3 code,
+h1 code, h2 code, h3 code { /* fix for tufte.css */
+    font-size: var(--ox-tufte-heading-code-font-size);
+}
+code {
+    vertical-align: middle;
+}
+.sidenote code, .marginnote code, /* inline code */
+.marginnote pre {                 /* code blocks */
+    font-size: var(--ox-tufte-note-code-font-size);
+    line-height: var(--ox-tufte-note-line-height);
+}
+
+article div figure {
+    /* tufte.css doesn't intend figure to be within div, but org generates it as
+     * such. reset width to full width of article as tufte.css intends */
+    max-width: 100%
+}
+blockquote p, blockquote footer {
+    width: 100%
+}
+
+/**********************************************************/
+/* tufte.css fixes; should probably be submitted upstream */
+/**********************************************************/
+.sans .numeral { /* don't use et-book-roman-old-style when using .sans */
+    font-family: "Gill Sans", "Gill Sans MT", Calibri, sans-serif;
+}
+article { /* needed, if sidenotes have large content */
+    /* we don't apply this on "section", because we do want the sections to be
+     * overlappable with the sidenotes of previous section */
+    overflow-y: auto;
+}
+
+/****************************/
+/* unset/alter org defaults */
+/****************************/
+#content { /* ID corresponding to main article (excluding pre/postamble) */
+    max-width: 100%;
+}
+/* verse */
+p.verse { /* this verse element will always be within a <blockquote> */
+    /* tufte.css already provides margin-left/right for enclosing blockquote */
+    margin-left: 0;
+}
+#footnotes { /* needed, if sidenotes have large content */
+     /* we want to make sure that the footnotes section starts after all the content
+      * for "sections" and "sidenotes" is done */
+    clear: both;
+    width: unset;
+}
+
+/***************************/
+/* undo tufte.css defaults */
+/***************************/
+body pre.example { /* in org, this is within blockquote */
+    font-style: normal;
+}
+/* verse: undoing "blockquote p, blockquote footer" from tufte.css */
+div.verse blockquote p, div.verse blockquote footer {
+    width: 100%
+}
+
+/********************************************************/
+/* verse blocks: support and distinguish from epigraphs */
+/********************************************************/
+div.verse > blockquote {
+    /* gray bar on the left */
+    border-left: 3px solid #ccc;
+    padding-left: 10px;
+}
+
+/***********************************/
+/* tufte.css consistent extensions */
+/***********************************/
+/***************************/
+/* support for h4 headings */
+/***************************/
+h4 > code {
+    font-size: var(--ox-tufte-heading-code-font-size);
+}
+h4 {
+    font-style: var(--ox-tufte-heading-font-style);
+    font-weight: var(--ox-tufte-heading-font-weight);
+    margin-bottom: var(--ox-tufte-heading-min-margin-bottom);
+    line-height: var(--ox-tufte-heading-line-height);
+}
+h4 {
+    font-size: 1.5rem; /* h3=1.7rem; */
+    margin-top: 1.8rem; /* h3=2rem; */
+}
+
+/************************************/
+/* sidenotes in headings h2, h3, h4 */
+/************************************/
+h2 .sidenote, h2 .marginnote,
+h3 .sidenote, h3 .marginnote,
+h4 .sidenote, h4 .marginnote {
+    font-style: normal;
+    font-weight: normal;
+}
+
+/**********************/
+/* footnote reference */
+/**********************/
+.sidenote-number > sup.numeral, .sidenote > sup.numeral {
+    /* same as ".sidenote-number:after", ".sidenote:before" */
+    font-size: 1rem;
+    line-height: 1rem;
+}
+/* we don't rely on CSS numbering */
+.sidenote-number:after, .sidenote:before {
+    content: none;
+}
+
+/****************/
+/* small screen */
+/****************/
+@media (max-width: 760px) {
+    :root {
+        --ox-tufte-content-width: 100%;
+        --ox-tufte-fullwidth: 100%;
+        --ox-tufte-list-width: 90;
+        --ox-tufte-list-padding-left: 10%;
+    }
+    /**********************************************************/
+    /* tufte.css fixes; should probably be submitted upstream */
+    /**********************************************************/
+    .margin-toggle:checked + .sidenote,
+    .margin-toggle:checked + .marginnote {
+        /* what tufte.css does results in minute horizontal scrolling on*/
+        /* sufficiently small screens; below fixes that */
+        margin-left: auto;
+        margin-right: 0;
+        left: 0;
+        float: right;
+    }
+    .marginnote img, .sidenote img {
+        height: auto;
+        width: auto;
+    }
+}
+
+/*****************************************************************************/
+/* assorted bugfixes and additional tweaks                                   */
+/* NOTE: code below likely needs to be refactored and assimilated into above */
+/*****************************************************************************/
+
+
+
+/* BEGIN: width and placement of sidenotes + lists, epigraphs */
+:root {
+    --ox-tufte-sidenote-width-max: 385px;
+    --ox-tufte-sidenote-width-standard: 50%;
+    --ox-tufte-sidenote-margin-right-min: -462px;
+    --ox-tufte-sidenote-margin-right-standard: -60%;
+}
+article > blockquote { /* assuming within an element 55% in width */
+    width: 50%;
+    margin-left: 5%;
+}
+blockquote {
+    margin-left: calc(100% / 11);
+    margin-right: 0;
+}
+blockquote .sidenote, blockquote .marginnote {
+    min-width: unset;
+    width:calc(var(--ox-tufte-sidenote-width-standard) / (10 / 11));
+    margin-right:calc(var(--ox-tufte-sidenote-margin-right-standard) / (10 / 11));
+}
+@media (max-width: 760px) {
+    div.epigraph blockquote p { overflow-y: auto; }
+}
+article ul, article ol, article dl {
+    width: var(--ox-tufte-list-width); /* 50% */
+    padding-inline-start: var(--ox-tufte-list-padding-left); /* 5% */
+}
+article ul ul, article ol ol, article ul ol, article ol ul {
+    padding-inline-start: calc(100% / 10); /* 5% wrt body, when 100% is 50% */
+    width: calc(100% * 9 / 10); /* 45% wrt body, when 100% is 50% */
+}
+article ul ul ul, article ol ol ul, article ul ol ul, article ol ul ul,
+article ul ul ol, article ol ol ol, article ul ol ol, article ol ul ol {
+    padding-inline-start: calc(100% / 9); /* 5% wrt body, when 100% is 45% */
+    width: calc(100% * 8 / 9); /* 40% wrt body, when 100% is 45% */
+}
+section ul, section ol, section dl {
+    padding-inline-start: calc(100% / 11);
+    width: calc(100% * 10 / 11);
+}
+article ul .sidenote, article ol .sidenote,
+article ul .marginnote, article ol .marginnote {
+    width: min(var(--ox-tufte-sidenote-width-max), calc(var(--ox-tufte-sidenote-width-standard) / (10 / 11)));
+    margin-right: max(var(--ox-tufte-sidenote-margin-right-min), calc(var(--ox-tufte-sidenote-margin-right-standard) / (10 / 11)));
+}
+article ul ul .sidenote, article ul ul .marginnote,
+article ul ol .sidenote, article ul ol .marginnote,
+article ol ol .sidenote, article ol ol .marginnote,
+article ol ul .sidenote, article ol ul .marginnote { /* 11/9 = 11/10 X(10/9) */
+    width: min(var(--ox-tufte-sidenote-width-max), calc(var(--ox-tufte-sidenote-width-standard) / (9 / 11)));
+    margin-right: max(var(--ox-tufte-sidenote-margin-right-min), calc(var(--ox-tufte-sidenote-margin-right-standard) / (9 / 11)));
+}
+article ul ul ul .sidenote, article ul ul ul .marginnote,
+article ul ul ol .sidenote, article ul ul ol .marginnote,
+article ul ol ul .sidenote, article ul ol ul .marginnote,
+article ul ol ol .sidenote, article ul ol ol .marginnote,
+article ol ol ul .sidenote, article ol ol ul .marginnote,
+article ol ol ol .sidenote, article ol ol ol .marginnote,
+article ol ul ul .sidenote, article ol ul ul .marginnote
+article ol ul ol .sidenote, article ol ul ol .marginnote { /* 11/8 = 11/10 X(10/9) X(9/8) */
+    width: min(var(--ox-tufte-sidenote-width-max), calc(var(--ox-tufte-sidenote-width-standard) / (8 / 11)));
+    margin-right: max(var(--ox-tufte-sidenote-margin-right-min), calc(var(--ox-tufte-sidenote-margin-right-standard) / (8 / 11)));
+}
+@media (max-width: 760px) {
+    ul li, ol li {
+        overflow-y: auto;
+        /* however, this causes issues: https://stackoverflow.com/a/40912185 */
+        list-style-position: inside;
+        margin-left: -1em;
+    }
+}
+/* fix padding issues first and make them percentages */
+article dl > dd {
+    margin-left: calc(100% / 10);
+}
+/* fix sidenote width and margin-right */
+article dl dt .sidenote, article dl dt .marginnote {
+    width: min(var(--ox-tufte-sidenote-width-max), calc(var(--ox-tufte-sidenote-width-standard) / (10 / 11)));
+    margin-right: max(var(--ox-tufte-sidenote-margin-right-min), calc(var(--ox-tufte-sidenote-margin-right-standard) / (10 / 11)));
+    font-weight: normal;
+}
+article dl dd .sidenote, article dl dd .marginnote { /* 11/9 = 11/10 X(10/9) */
+    width: min(var(--ox-tufte-sidenote-width-max), calc(var(--ox-tufte-sidenote-width-standard) / (9 / 11)));
+    margin-right: max(var(--ox-tufte-sidenote-margin-right-min), calc(var(--ox-tufte-sidenote-margin-right-standard) / (9 / 11)));
+}
+/* also check on smaller screens */
+@media (max-width: 760px) {
+    dl dt, dl dd {
+        overflow-y: auto;
+    }
+}
+article dl dl {
+    padding-inline-start: calc(100% / 9); /* 5% wrt body, when 100% is 45% wrt body */
+    width: calc(100% * 8 / 9); /* 40% wrt body */
+}
+article dl dl > dd {
+    margin-left: calc(100% / 8) /* 5% wrt body, when 100% is 40% wrt body */
+}
+article dl dl dt .sidenote, article dl dl dt .marginnote { /* 11/8 = 11/10 x 10/9 x 9/8 */
+    width: min(var(--ox-tufte-sidenote-width-max), calc(var(--ox-tufte-sidenote-width-standard) / (8 / 11)));
+    margin-right: max(var(--ox-tufte-sidenote-margin-right-min), calc(var(--ox-tufte-sidenote-margin-right-standard) / (8 / 11)));
+    font-weight: normal;
+}
+article dl dl dd .sidenote, article dl dl dd .marginnote { /* 11/7 */
+    width: min(var(--ox-tufte-sidenote-width-max), calc(var(--ox-tufte-sidenote-width-standard) / (7 / 11)));
+    margin-right: max(var(--ox-tufte-sidenote-margin-right-min), calc(var(--ox-tufte-sidenote-margin-right-standard) / (7 / 11)));
+}
+
+/* BEGIN BONUS: fix top-level code blocks */
+article>section .org-src-container { /* make .org-src-container in ox-tufte.css more specific */
+    max-width: var(--ox-tufte-fullwidth);
+    width: var(--ox-tufte-fullwidth);
+}
+article > div.org-src-container { /* override .org-src-container in ox-tufte.css for toplevel */
+    max-width: 90%;
+    width: 90%;
+}
+/* END BONUS: fix top-level code blocks */
+/* END: width and placement of sidenotes + lists, epigraphs */
+
+/* BEGIN: width of result blocks */
+article > pre.example {
+    width: calc(97% * 0.9);
+    margin-right: 10%;
+}
+section pre.example {
+    width: calc(var(--ox-tufte-fullwidth) * 0.97);
+    margin-left: calc(var(--ox-tufte-fullwidth) * 0.03);
+}
+@media (max-width: 760px) {
+    section pre.example {
+        margin-left: auto;
+    }
+}
+/* END: width of result blocks */
+
+/* BEGIN: fix horizontal scroll on small screens */
+.org-src-name {
+    display: inline-block;
+    max-width: 100%;
+    overflow-x: auto;
+}
+/* END: fix horizontal */
+
+/* BEGIN: block margin notes */
+/***************************************************************************/
+/* block marginnotes - allows us to include lists, paragraphs, tables etc. */
+/***************************************************************************/
+article div { /* add missing default from tufte.css */
+    font-size: var(--ox-tufte-content-font-size);
+    line-height: var(--ox-tufte-content-line-height);
+}
+div.epigraph {
+    /* NOTE: tufte.css has margins for epigraph in "em" which relies on font-size
+     * for div element not being altered from default; otherwise epigraph margin
+     * will scale with it (<https://zellwk.com/blog/rem-vs-em/>). now epigraphs,
+     * unlike quotes don't have any business in the margin area. but if we did,
+     * it wouldn't make sense to use the same margin absolutely. thus
+     * blockquotes should be in 'em' instead of 'rem'. however, in order to get
+     * same behaviour as tufte either the 'em' value will need to be modified
+     * for epigraph or the font size specified for 'article div' will need to be
+     * modified and will no longer be consistent with 'p'. */
+    margin: var(--ox-tufte-content-epigraph-margin-vertical) 0;
+}
+div.marginnote dl,
+div.marginnote ol,
+div.marginnote p,
+div.marginnote ul {
+    font-size: var(--ox-tufte-note-font-size);
+    line-height: var(--ox-tufte-note-line-height);
+}
+div.marginnote p {
+    margin-top: var(--ox-tufte-note-font-size);
+    margin-bottom: var(--ox-tufte-note-font-size);
+}
+@media (max-width: 760px) {
+    div.marginnote + *, /* needed for block marginnotes */
+    h2, h3, h4, p { /* these are needed for margin/sidenotes in general */
+        clear: both;
+    }
+}
+/* END: block margin notes */
+
+/* BEGIN: captions on figures */
+figure > figcaption { /* undo tufte-css tweaks, till they're better supported */
+    max-width: unset;
+    float: left;
+    width: 100%;
+}
+/* undo tufte-css tweaks, till they're better supported */
+figure.fullwidth figcaption {
+    margin-right: unset;
+}
+img.fullwidth + figcaption {
+    width: var(--ox-tufte-fullwidth);
+}
+/* END: captions on figures */
+
+/* BEGIN: fullwidth images */
+img.fullwidth {
+    display: block;
+}
+/* END: fullwidth images */
+
+/* BEGIN: prevent side-scroll when result of inline call is long */
+article code {
+    overflow-x: auto;
+    max-width: 100%;
+    display: inline-block;
+}
+/* END: prevent side-scroll when result of inline call is long */
+
+
+/* ===== Plex ===== */
+body, article {
+  font-family: "IBM Plex Serif", et-book, Georgia, serif !important;
+  background-color: #fffff8;
+  color: #111;
+}
+h1, h2, h3, h4, h5, .sans {
+  font-family: "IBM Plex Sans", system-ui, sans-serif !important;
+  font-weight: 500;
+}
+code, pre, .org-src-container pre {
+  font-family: "IBM Plex Mono", ui-monospace, monospace !important;
+}
+.sidenote, .marginnote {
+  font-family: "IBM Plex Serif", Georgia, serif;
+}
+mjx-container, .MathJax, .katex { margin: 0.6em 0; }
+</style>
+</head>
+<body>
+<article id="content" class="content">
+<header>
+<h1 class="title">s6-linux-init + Shepherd boot configuration</h1>
+</header><nav id="table-of-contents" role="doc-toc">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents" role="doc-toc">
+<ul>
+<li><a href="#org99740b2">1. Introduction</a></li>
+<li><a href="#org035d307">2. The three layers</a></li>
+<li><a href="#org68c6d81">3. Shepherd&rsquo;s graph</a></li>
+<li><a href="#org3825dab">4. Add a service (template + worked example)</a>
+<ul>
+<li><a href="#org92cd970">4.1. example: <i>syncthing</i> as a system service ():</a></li>
+</ul>
+</li>
+<li><a href="#org7c02da5">5. Runtime model (what you observe at boot)</a></li>
+<li><a href="#org254302a">6. Layout</a></li>
+<li><a href="#orga34b9aa">7. Install &amp; bring up (manual)</a></li>
+</ul>
+</div>
+</nav>
+<section id="outline-container-org99740b2" class="outline-2">
+<h2 id="org99740b2"><span class="section-number-2">1.</span> Introduction</h2>
+<div class="outline-text-2" id="text-1">
+<p>
+This is the only documentation this boot stack needs.  It describes, end to
+end, how a single Void Linux root with a Guix-installed Shepherd <code>0.10.5</code> (and a
+Guile <code>3.0.9</code>) comes up, and how to add a new service to it.<label id='fnr.1' for='fnr-in.1.9960513' class='margin-toggle sidenote-number'><sup class='numeral'>1</sup></label><input type='checkbox' id='fnr-in.1.9960513' class='margin-toggle'><span class='sidenote'><sup class='numeral'>1</sup>
+<i>Why not just use Guix System&rsquo;s <code>operating-system</code> /services</i>?
+Because owning <code>dracut -&gt; s6 -&gt; Shepherd</code> explicitly makes every failure mode
+legible and avoids Guix SD&rsquo;s implicit service graph. This repo is that explicit graph.
+</span>
+</p>
+
+<p>
+A machine has one service manager, not three.  Here it is #4, with s6 reduced
+to the smallest thing that makes that possible.
+</p>
+
+<label for='mn-auto.4592373' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.4592373' class='margin-toggle'><div class="marginnote" id="orge5c2058">
+<p>
+<code>guix build shepherd</code> resolves to the store path of Shepherd; the symlink keeps
+<code>/usr/local/bin/shepherd</code> stable across profile generations. guix build
+See the Guix manual for details on profile generation stability.
+</p>
+
+</div>
+</div>
+</section>
+<section id="outline-container-org035d307" class="outline-2">
+<h2 id="org035d307"><span class="section-number-2">2.</span> The three layers</h2>
+<div class="outline-text-2" id="text-2">
+<div class="org-src-container">
+<pre class="src src-text"><code>+--------------------------------------------+
+|         Layer 1: dracut initramfs          |
+|  hardware discovery, storage, mount root   |
++--------------------------------------------+
+                     |
+                     |
+                     v
++--------------------------------------------+
+|           Layer 2: s6-linux-init           |
+|    mount @gnu, @log, mkdir control dirs    |
++--------------------------------------------+
+                     |
+                     |
+                     v
++--------------------------------------------+
+|        Layer 3: GNU Shepherd 0.10.5        |
+| root-rw, pseudo-filesystems, cgroups, udev |
++--------------------------------------------+
+</code></pre>
+</div>
+
+<p>
+S6&rsquo;s only job is Layer 2: bring the store and runtime writable, then hand
+control to Shepherd with <code>(exec)</code>. Shepherd then runs the whole graph; s6
+does <i>not</i> manage services.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-sh"><code><span style="color: #6f7787;">#</span><span style="color: #6f7787;">!/bin/</span><span style="color: #81A1C1;">sh</span><span style="color: #6f7787;"> -e
+</span><span style="color: #6f7787;"># </span><span style="color: #6f7787;">s6 stage 0 -&gt; Shepherd handoff.  Regenerate with:
+</span><span style="color: #6f7787;">#   </span><span style="color: #6f7787;">s6-linux-init-maker -b /etc/s6-linux-init/skel &lt;more options&gt;
+</span><span style="color: #D8DEE9;">DISK_UUID</span>=abcd-...
+
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">--- 1. mount what Shepherd/store need (idempotent) ---
+</span>mountpoint -q /gnu     || mount -t btrfs -o <span style="color: #D8DEE9;">subvol</span>=@/@gnu,noatime /dev/disk/by-uuid/$<span style="color: #D8DEE9;">DISK_UUID</span> /gnu <span style="color: #A3BE8C;">\</span>
+                       || mount -t btrfs -o <span style="color: #D8DEE9;">subvol</span>=@gnu,noatime       /dev/disk/by-uuid/$<span style="color: #D8DEE9;">DISK_UUID</span> /gnu
+mountpoint -q /var/log || mount -t btrfs -o <span style="color: #D8DEE9;">subvol</span>=@log,noatime       /dev/disk/by-uuid/$<span style="color: #D8DEE9;">DISK_UUID</span> /var/log
+mountpoint -q /var/tmp || mount -t btrfs -o <span style="color: #D8DEE9;">subvol</span>=@tmp,noatime       /dev/disk/by-uuid/$<span style="color: #D8DEE9;">DISK_UUID</span> /var/tmp
+mountpoint -q /var/cache || mount -t btrfs -o <span style="color: #D8DEE9;">subvol</span>=@cache,noatime   /dev/disk/by-uuid/$<span style="color: #D8DEE9;">DISK_UUID</span> /var/cache
+
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">--- 2. exec Shepherd (PID 1) ---
+</span><span style="color: #D8DEE9;">SHEPHERD</span>=/usr/local/bin/shepherd    <span style="color: #6f7787;"># </span><span style="color: #6f7787;">or /gnu/current-guix-profile/bin/shepherd
+</span><span style="color: #81A1C1;">[</span> -x <span style="color: #A3BE8C;">"</span><span style="color: #81A1C1;">$</span><span style="color: #D8DEE9;">SHEPHERD</span><span style="color: #A3BE8C;">"</span> <span style="color: #81A1C1;">]</span> || <span style="color: #81A1C1;">exec</span> /sbin/agetty --noclear -a root tty1 linux
+<span style="color: #8FBCBB;">mkdir</span> -p /run/shepherd
+<span style="color: #A3BE8C;">"</span><span style="color: #81A1C1;">$</span><span style="color: #D8DEE9;">SHEPHERD</span><span style="color: #A3BE8C;">"</span> -c /etc/shepherd/config.scm -s /run/shepherd/socket <span style="color: #A3BE8C;">\</span>
+            -l /var/log/shepherd.log -I
+</code></pre>
+</div>
+
+<label for='mn-auto.9480273' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.9480273' class='margin-toggle'><div class="marginnote" id="org19fd414">
+<p>
+The generator writes <code>current/scripts/rc.init</code> from <code>skel/rc.init</code>.  Edit the
+<code>skel</code> copy and re-run <code>s6-linux-init-maker</code> — never patch <code>current</code> directly.
+</p>
+
+</div>
+</div>
+</section>
+<section id="outline-container-org68c6d81" class="outline-2">
+<h2 id="org68c6d81"><span class="section-number-2">3.</span> Shepherd&rsquo;s graph</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+Shepherd does not have a &ldquo;boot script&rdquo;. It has a dependency graph and a
+target symbol that means &ldquo;everything that must be up&rdquo;; starting that symbol
+resolves and runs the whole graph in parallel.
+</p>
+
+<p>
+The targets live in <code>services.d/28-boot-stages.scm</code> <label id='fnr.2' for='fnr-in.2.2807743' class='margin-toggle sidenote-number'><sup class='numeral'>2</sup></label><input type='checkbox' id='fnr-in.2.2807743' class='margin-toggle'><span class='sidenote'><sup class='numeral'>2</sup>
+Shepherd has no <b>runlevel</b>.  A <code>stage</code> here is a <code>service</code> whose <code>#:start</code> is <code>(const #t)</code>
+i.e. a named barrier whose only purpose is its <code>#:requirement</code>, so the DAG is readable from one file.
+See info:(shepherd)Service Types and <code>services.d/28-boot-stages.scm</code>.
+</span>
+</p>
+
+<div class="org-src-container">
+<pre class="src src-scheme"><code><span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">boot-critical</span>   '<span style="color: #B48EAD;">(</span>root-rw pseudo-filesystems runtime-dirs
+                          static-device-nodes kernel-modules cgroups udev
+                          udev-settle file-systems hostname log-files syslog
+                          sysctl random-seed dmesg swap guix-daemon<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">boot-ready</span>      '<span style="color: #B48EAD;">(</span>pseudo-filesystems cgroups udev udev-settle file-systems
+                          hostname runtime-directories log-files syslog random-seed<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">interactive</span>     '<span style="color: #B48EAD;">(</span>boot-ready agetty-tty1..6<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+<span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">fully-online</span>    '<span style="color: #B48EAD;">(</span>interactive loopback dbus polkit elogind seatd
+                          acpid network-manager zram openssh chrony<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+</code></pre>
+</div>
+
+<p>
+Boot DAG (what actually gates the gettys):
+</p>
+
+<pre class="example" id="org29b148b">
+                          root-rw
+                       ───┬──────┬──────────────┐
+         pseudo-filesystems cgroups    runtime-dirs
+       (proc sys run dev ┌──cgroup2  (mkdir /run, /run/user
+        dev-pts dev-shm  └──cgroup-v1 runtime-dirs)
+        securityfs mqueue              │
+        efivarfs)                      │
+                       udev ─ udev-settle ─────────┤
+                          │ static-device-nodes    │
+                   file-systems ─ swap ────────────┤
+                          │ hostname               │
+                   log-files ─ syslog ─────────────┤
+                 kernel-modules ─ random-seed ─────┤
+                          │                        │
+                      boot-ready ─ agetty-tty1..6 ─┤
+                          │                        │
+                interactive ─ loopback ─ dbus ─────┤
+                          │            polkit  │   │
+                 fully-online ─ network-manager ───┘
+
+                   seatd · acpid · zram · ssh · chrony
+                         (float — do NOT gate login)
+</pre>
+
+<label for='mn-auto.6905364' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.6905364' class='margin-toggle'><div class="marginnote" id="org57c69ed">
+<p>
+The solid lines are <code>#:requirement</code> edges. Gettys depend on <code>boot-ready</code>,
+not on network/D-Bus/desktop, so a slow link or GUI never blanks the login
+prompt.  <code>udev</code> is <code>eudev</code> from Void (Shepherd just supervises it); device
+nodes are pre-seeded by <code>05-static-devnodes.scm</code> for udev&rsquo;s very first run.
+Udev (ArchWiki) covers the rules format.
+</p>
+
+</div>
+</div>
+</section>
+<section id="outline-container-org3825dab" class="outline-2">
+<h2 id="org3825dab"><span class="section-number-2">4.</span> Add a service (template + worked example)</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+Every service is a <code>(service '(provides) #:requirement '(...) #:start ...)</code>.
+That <i>is</i> the configuration: declare what it <i>is</i>, what it <i>waits on</i>, and
+what it <i>does</i>, and never a serial <code>start</code> ladder.
+</p>
+
+<p>
+Template (copy to <code>services.d/NN-name.scm</code>):
+</p>
+
+<div class="org-src-container">
+<pre class="src src-scheme"><code><span style="color: #6f7787;">;; </span><span style="color: #6f7787;">NN-name.scm --- one line.
+</span>
+<span style="color: #6f7787;">;; </span><span style="color: #6f7787;">Why it exists: &lt;sentence&gt;.  Why that dependency list: &lt;edges&gt;.
+</span><span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">name</span>
+  <span style="color: #B48EAD;">(</span>service '<span style="color: #A3BE8C;">(</span>name alias<span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:documentation</span> <span style="color: #A3BE8C;">"Human sentence."</span>
+    <span style="color: #81A1C1;">#:requirement</span> '<span style="color: #A3BE8C;">(</span>the-services-it-cannot-run-without<span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:start</span>  <span style="color: #A3BE8C;">(</span>make-forkexec-constructor '<span style="color: #5D80AE;">(</span><span style="color: #A3BE8C;">"name"</span> <span style="color: #A3BE8C;">"args"</span> &#8230;<span style="color: #5D80AE;">)</span>
+                  <span style="color: #81A1C1;">#:log-file</span> <span style="color: #A3BE8C;">"/var/log/name.log"</span><span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:stop</span>   <span style="color: #A3BE8C;">(</span>make-kill-destructor<span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:respawn?</span> #t<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>            <span style="color: #6f7787;">; </span><span style="color: #6f7787;">one-shot? #t for transient steps
+</span>
+<span style="color: #81A1C1;">(</span>register-services <span style="color: #B48EAD;">(</span>list name<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+</code></pre>
+</div>
+
+<p>
+Checklist:
+</p>
+<ol class="org-ol">
+<li>Add the file (zero-padded <code>NN</code> sorts before 28-boot-stages).</li>
+<li>Pick <i>real</i> provides (a list of symbols; not a string, not a list-in-a-list) and the minimal <code>#:requirement</code>.</li>
+<li>For daemons: argv list + <code>#:log-file</code> + <code>make-kill-destructor</code> + <code>#:respawn? #t</code>.</li>
+<li>For one-shots (<code>mkdir</code>, <code>swapon</code>, <code>keygen</code>): <code>#:start</code> thunk/~run-or-ignored~ + <code>#:one-shot? #t</code> + <code>#:stop (const #t)</code>.</li>
+<li>Wire it into a stage: edit the <code>#:requirement</code> of <code>interactive</code> or <code>fully-online</code>&rsquo;s <code>stage</code> in 28-boot-stages if it should be part of one.<label id='fnr.3' for='fnr-in.3.2178101' class='margin-toggle sidenote-number'><sup class='numeral'>3</sup></label><input type='checkbox' id='fnr-in.3.2178101' class='margin-toggle'><span class='sidenote'><sup class='numeral'>3</sup>
+The stage <code>#:requirement</code> list is the &ldquo;what must be up before X is considered up&rdquo; contract.
+Add your symbol there to make it part of an ordered phase; leave it out and it only starts if something
+else pulls it in.
+</span></li>
+<li>Reload: <code>herd load config.scm</code>.  Shepherd restarts only what changed; already-running services are untouched.</li>
+</ol>
+</div>
+<div id="outline-container-org92cd970" class="outline-3">
+<h3 id="org92cd970"><span class="section-number-3">4.1.</span> example: <i>syncthing</i> as a system service (<label id='fnr.4' for='fnr-in.4.9395905' class='margin-toggle sidenote-number'><sup class='numeral'>4</sup></label><input type='checkbox' id='fnr-in.4.9395905' class='margin-toggle'><span class='sidenote'><sup class='numeral'>4</sup>
+Syncthing is a fine <code>fully-online</code> citizen: network-bound, not login-critical,
+restart-on-crash via <code>#:respawn? #t</code>. The example intentionally uses the <code>system</code> instance;
+for a desktop session move it to <code>user-shepherd</code>, set <code>HOME</code> and <code>XDG_CONFIG_HOME</code>, and require <code>seatd</code>.
+</span>):</h3>
+<div class="outline-text-3" id="text-4-1">
+<div class="org-src-container">
+<pre class="src src-scheme"><code><span style="color: #6f7787;">;;; </span><span style="color: #6f7787;">31-syncthing-example.scm --- Syncthing daemon
+</span>
+<span style="color: #6f7787;">;; </span><span style="color: #6f7787;">Needs: network up (network-manager), persistent data on disk (file-systems),
+</span><span style="color: #6f7787;">;; </span><span style="color: #6f7787;">and an unprivileged user + homedir.  Not required for login, so it lives in
+</span><span style="color: #6f7787;">;; </span><span style="color: #6f7787;">~fully-online~ and floats behind the gettys.
+</span><span style="color: #81A1C1;">(</span><span style="color: #81A1C1;">define</span> <span style="color: #88C0D0;">syncthing</span>
+  <span style="color: #B48EAD;">(</span>service '<span style="color: #A3BE8C;">(</span>syncthing<span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:documentation</span> <span style="color: #A3BE8C;">"Syncthing file synchronizer (system instance)."</span>
+    <span style="color: #81A1C1;">#:requirement</span> '<span style="color: #A3BE8C;">(</span>network-manager file-systems<span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:start</span> <span style="color: #A3BE8C;">(</span>make-forkexec-constructor
+             '<span style="color: #5D80AE;">(</span><span style="color: #A3BE8C;">"/usr/bin/syncthing"</span> <span style="color: #A3BE8C;">"-no-browser"</span> <span style="color: #A3BE8C;">"-gui-address=0.0.0.0:8384"</span><span style="color: #5D80AE;">)</span>
+             <span style="color: #81A1C1;">#:log-file</span> <span style="color: #A3BE8C;">"/var/log/syncthing.log"</span><span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:stop</span> <span style="color: #A3BE8C;">(</span>make-kill-destructor<span style="color: #A3BE8C;">)</span>
+    <span style="color: #81A1C1;">#:respawn?</span> #t<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+
+<span style="color: #81A1C1;">(</span>register-services <span style="color: #B48EAD;">(</span>list syncthing<span style="color: #B48EAD;">)</span><span style="color: #81A1C1;">)</span>
+</code></pre>
+</div>
+
+<p>
+To enable: <code>cp</code> the file into <code>/etc/shepherd/services.d/</code>, add <code>syncthing</code> to
+the <code>fully-online</code> <code>stage</code> requirements in <code>28-boot-stages.scm</code>, then <code>herd
+load config.scm</code>.  A new <code>syncthing</code> service appears in <code>herd status</code> with no
+Shepherd restart.<label id='fnr.5' for='fnr-in.5.8122864' class='margin-toggle sidenote-number'><sup class='numeral'>5</sup></label><input type='checkbox' id='fnr-in.5.8122864' class='margin-toggle'><span class='sidenote'><sup class='numeral'>5</sup>
+syncthing/README · its systemd unit <code>network-online.target + local-fs.target</code>
+maps exactly to <code>network-manager + file-systems</code> here.
+</span>
+</p>
+
+<label for='mn-auto.5774974' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.5774974' class='margin-toggle'><div class="marginnote" id="orga060e12">
+<p>
+Syncthing ships a systemd unit that does the same <code>network-online +
+filesystem</code> dance; this is the manual port.  For a per-user GUI session, put
+the same service under <code>user-shepherd/services.d/</code> with <code>GUIX_PROFILE</code> set.
+</p>
+
+</div>
+</div>
+</div>
+</section>
+<section id="outline-container-org7c02da5" class="outline-2">
+<h2 id="org7c02da5"><span class="section-number-2">5.</span> Runtime model (what you observe at boot)</h2>
+<div class="outline-text-2" id="text-5">
+<ul class="org-ul">
+<li><code>/etc/shepherd/config.scm</code> loads <code>services.d/*.scm</code>, then <code>(start-in-the-background '(fully-online))</code>.</li>
+<li>Shepherd resolves requirements breadth-first and <i>starts them concurrently</i> where the graph allows.<label id='fnr.6' for='fnr-in.6.8898226' class='margin-toggle sidenote-number'><sup class='numeral'>6</sup></label><input type='checkbox' id='fnr-in.6.8898226' class='margin-toggle'><span class='sidenote'><sup class='numeral'>6</sup>
+<code>start-in-the-background</code> (from <code>services.d/config.scm</code>) spawns a fiber that calls
+<code>start-in-parallel</code>: each node&rsquo;s <code>#:requirement</code> starts first, and siblings with no edge
+between them start concurrently.  Shepherd manual §&ldquo;Dependency resolution&rdquo;.
+</span>
+You see interleaved <code>Starting service X</code> / <code>Service X has been started.</code> lines in <code>/var/log/shepherd.log</code>.</li>
+<li>A service whose <code>#:start</code> throws is marked failed; dependents are skipped / retried, logged,
+and the boot continues on other branches — one bad daemon never hangs the whole boot.<label id='fnr.7' for='fnr-in.7.4671430' class='margin-toggle sidenote-number'><sup class='numeral'>7</sup></label><input type='checkbox' id='fnr-in.7.4671430' class='margin-toggle'><span class='sidenote'><sup class='numeral'>7</sup>
+Failures are per-service. Shepherd logs <code>Exception caught while starting X</code> to
+<code>/var/log/shepherd.log</code>, marks the service failed, and continues other branches rather than
+aborting the boot.  That is intentional: a one-shot <code>random-seed</code> failing must not stop <code>udev</code>.
+</span></li>
+<li><code>boot-ready</code> is the barrier behind which gettys wait; <code>fully-online</code> is everything else that is allowed to lag.</li>
+</ul>
+
+<div class="org-src-container">
+<pre class="src src-text"><code>$ herd status                   # on the running machine
+root                            (running)   uptime 00:00:47
+udev                            (running)   uptime 00:00:46
+syslog                          (running)   uptime 00:00:45
+boot-ready                      (stopped)   start it to unblock login
+agetty-tty1                     (running)   uptime 00:00:44
+fully-online                    (stopped)   start it to bring the rest
+$ tail -f /var/log/shepherd.log  # the spinner feeds this
+2026-... Starting service udev...
+2026-... Service udev has been started.
+</code></pre>
+</div>
+
+<label for='mn-auto.434429' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.434429' class='margin-toggle'><div class="marginnote" id="org8ea3830">
+<p>
+Shepherd also exposes <code>herd = the CLI.  =herd help</code>, <code>herd doc &lt;service&gt;</code>, and
+<code>[[info:(shepherd)Invoking shepherd][info:(shepherd)]]</code> cover every flag.
+</p>
+
+</div>
+</div>
+</section>
+<section id="outline-container-org254302a" class="outline-2">
+<h2 id="org254302a"><span class="section-number-2">6.</span> Layout</h2>
+<div class="outline-text-2" id="text-6">
+<div class="org-src-container">
+<pre class="src src-text"><code>shepherd/
+&#9500;&#9472;&#9472; readme.org                    &lt;- you are here
+&#9500;&#9472;&#9472; config.scm                    &lt;- Shepherd config entry point
+&#9500;&#9472;&#9472; services.d/
+&#9474;   &#9500;&#9472;&#9472; 00-utilities.scm          &lt;- shared helpers (no services)
+&#9474;   &#9500;&#9472;&#9472; 01-root.scm               &lt;- root-rw remount
+&#9474;   &#9500;&#9472;&#9472; 02-pseudo-fs.scm          &lt;- proc/sys/run/dev/+
+&#9474;   &#9500;&#9472;&#9472; 03-runtime-directories.scm
+&#9474;   &#9500;&#9472;&#9472; 04-cgroups.scm            &lt;- unified | hybrid | legacy
+&#9474;   &#9500;&#9472;&#9472; 05-static-devnodes.scm
+&#9474;   &#9500;&#9472;&#9472; 07-udev.scm               &lt;- udev + udev-settle
+&#9474;   &#9500;&#9472;&#9472; 08-file-systems.scm       &lt;- mount -a + swap
+&#9474;   &#9500;&#9472;&#9472; 09-hostname.scm
+&#9474;   &#9500;&#9472;&#9472; 10-sysctl.scm
+&#9474;   &#9500;&#9472;&#9472; 11-swap.scm
+&#9474;   &#9500;&#9472;&#9472; 12-dmesg.scm
+&#9474;   &#9500;&#9472;&#9472; 13-random-seed.scm        &lt;- seedrng
+&#9474;   &#9500;&#9472;&#9472; 14-log-files.scm
+&#9474;   &#9500;&#9472;&#9472; 15-syslog.scm             &lt;- socklog -&gt; /dev/log
+&#9474;   &#9500;&#9472;&#9472; 16-guix-daemon.scm
+&#9474;   &#9500;&#9472;&#9472; 17-getty.scm              &lt;- agetty-tty1..6
+&#9474;   &#9500;&#9472;&#9472; 18-loopback.scm
+&#9474;   &#9500;&#9472;&#9472; 19-dbus.scm               &lt;- dbus + dbus-runtime dir
+&#9474;   &#9500;&#9472;&#9472; 20-network.scm            &lt;- NetworkManager (dhcpcd opt-in)
+&#9474;   &#9500;&#9472;&#9472; 21-polkit.scm
+&#9474;   &#9500;&#9472;&#9472; 22-elogind.scm            &lt;- D-Bus-activated, one-shot pin
+&#9474;   &#9500;&#9472;&#9472; 23-seatd.scm
+&#9474;   &#9500;&#9472;&#9472; 24-acpid.scm
+&#9474;   &#9500;&#9472;&#9472; 25-zram.scm
+&#9474;   &#9500;&#9472;&#9472; 26-openssh.scm
+&#9474;   &#9500;&#9472;&#9472; 27-chrony.scm
+&#9474;   &#9492;&#9472;&#9472; 28-boot-stages.scm        &lt;- boot-ready/interactive/fully-online
+&#9500;&#9472;&#9472; s6-linux-init/
+&#9474;   &#9492;&#9472;&#9472; skel/rc.init              &lt;- stage-0 handoff (edit here)
+&#9492;&#9472;&#9472; user-shepherd/                &lt;- per-user Shepherd (sway etc.)       (WIP)
+    &#9500;&#9472;&#9472; config.scm
+    &#9492;&#9472;&#9472; services.d/sway.scm
+</code></pre>
+</div>
+</div>
+</section>
+<section id="outline-container-orga34b9aa" class="outline-2">
+<h2 id="orga34b9aa"><span class="section-number-2">7.</span> Install &amp; bring up (manual)</h2>
+<div class="outline-text-2" id="text-7">
+<div class="org-src-container">
+<pre class="src src-sh"><code><span style="color: #6f7787;"># </span><span style="color: #6f7787;">1. Shepherd config    -&gt;    where rc.init expects it
+</span><span style="color: #8FBCBB;">cp</span> services.d/*.scm           /etc/shepherd/services.d/
+<span style="color: #8FBCBB;">cp</span> config.scm                 /etc/shepherd/config.scm
+
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">2. Shepherd binary visible to rc.init (one of:)
+</span><span style="color: #8FBCBB;">ln</span> -s $<span style="color: #81A1C1;">(</span>guix build shepherd<span style="color: #81A1C1;">)</span>/bin/shepherd /usr/local/bin/shepherd       <span style="color: #6f7787;"># </span><span style="color: #6f7787;">Guix
+</span><span style="color: #6f7787;"># </span><span style="color: #6f7787;">or:  </span><span style="color: #6f7787;">ln</span><span style="color: #6f7787;"> -s $(which shepherd) /usr/local/bin/shepherd                  # Void
+</span>
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">3. s6 stage 0 from the skel (regenerates current/scripts/rc.init)
+</span>s6-linux-init-maker -b /etc/s6-linux-init/skel <span style="color: #A3BE8C;">\</span>
+  -u shepherd -g shepherd <span style="color: #A3BE8C;">\</span>
+  -s /run/s6-svscan <span style="color: #A3BE8C;">\</span>
+  -m /etc/s6-linux-init/monitor
+
+<span style="color: #6f7787;"># </span><span style="color: #6f7787;">4. Boot it (or reboot)
+</span><span style="color: #81A1C1;">exec</span> /etc/s6-linux-init/current/scripts/rc.init default
+</code></pre>
+</div>
+
+<label for='mn-auto.7569396' class='margin-toggle'>&#8853;</label><input type='checkbox' id='mn-auto.7569396' class='margin-toggle'><div class="marginnote" id="org77d42f8">
+<p>
+<code>guix build shepherd</code> resolves to the store path of Shepherd; the symlink keeps
+<code>/usr/local/bin/shepherd</code> stable across profile generations.  <code>guix build</code>
+</p>
+
+</div>
+</div>
+</section>
+</article>
+<footer id="postamble" class="status">
+<p class="date">Date: 2026-10-09 Fri 00:00</p>
+<p class="author">Author: Komeil Parseh</p>
+<p class="date">Created: 2026-10-09 Fri 19:26</p>
+</footer>
+</body>
+</html>

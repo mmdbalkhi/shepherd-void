@@ -1,0 +1,198 @@
+#!/bin/sh -e
+
+# s6-linux-init stage-0 -> Shepherd handoff.
+#
+# This file lives in the s6-linux-init *skeleton* (skel/rc.init), not in
+# `current/scripts/`.  Regenerate with:
+#   s6-linux-init-maker -b /etc/s6-linux-init/skel ...
+# s6-linux-init-maker copies it to current/scripts/rc.init, so edits here
+# survive rebuilds.
+#
+# This script does THREE things and no more:
+#   1. ensure /gnu, /var/log, /var/tmp, /var/cache, /var/run exist and are
+#      mounted (the minimal set Shepherd + the store need before it can run),
+#   2. launch the Shepherd daemon (config.scm then drives the whole graph via
+#      its dependency requirements),
+#   3. tail Shepherd's logfile to the console with a colored spinner.
+# Nothing past this point is managed by s6 -- Shepherd owns udev, dbus,
+# networking, gettys, sway, etc.
+
+rl="$1"
+shift
+
+DISK_UUID=EDIT_THIS
+LOGFILE=/var/log/s6-shepherd-boot.log
+CONSOLE_LOGLEVEL=4
+
+if grep -q 'loglevel=[7-9]' /proc/cmdline 2>/dev/null; then
+	CONSOLE_LOGLEVEL=7
+fi
+
+_log() {
+	# $1 = level, $2 = msg, $3 = color
+	echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" >>"$LOGFILE" 2>/dev/null || true
+	printf "${3}%s\033[0m\n" "$2" >/dev/console 2>/dev/null || true
+}
+
+log() {
+	level="${1:-info}"
+	shift
+	msg="$*"
+	color=""
+
+	case "$level" in
+	critical | error)
+		color='\033[1;31m' # red
+		_log "$level" "$msg" "$color"
+		;;
+	warn)
+		color='\033[1;33m' # yellow
+		_log "$level" "$msg" "$color"
+		;;
+	debug)
+		color='\033[0m' # no colour
+		[ "$CONSOLE_LOGLEVEL" -ge 7 ] && _log "$level" "$msg" "$color"
+		;;
+	info)
+		color='\033[1;32m' # green
+		[ "$CONSOLE_LOGLEVEL" -ge 6 ] && _log "$level" "$msg" "$color"
+		;;
+	*)
+		color='\033[0m' # no colour
+		_log "$level" "$msg" "$color"
+		;;
+	esac
+}
+
+# /var/run is a compatibility symlink to /run on modern systems.
+if [ ! -e /var/run ]; then
+	ln -sfn /run /var/run
+fi
+
+mkdir -p /var/log
+if ! mountpoint -q /var/log 2>/dev/null; then
+	mount -t btrfs -o subvol=@log,noatime "/dev/disk/by-uuid/$DISK_UUID" /var/log || true
+fi
+
+mkdir -p /var/tmp
+if ! mountpoint -q /var/tmp 2>/dev/null; then
+	mount -t btrfs -o subvol=@tmp,noatime "/dev/disk/by-uuid/$DISK_UUID" /var/tmp || true
+fi
+
+mkdir -p /var/cache
+if ! mountpoint -q /var/cache 2>/dev/null; then
+	mount -t btrfs -o subvol=@cache,noatime "/dev/disk/by-uuid/$DISK_UUID" /var/cache || true
+fi
+
+mkdir -p /gnu
+if ! mountpoint -q /gnu; then
+	mount -t btrfs -o subvol=@/@gnu,noatime "/dev/disk/by-uuid/$DISK_UUID" /gnu ||
+		mount -t btrfs -o subvol=@gnu,noatime "/dev/disk/by-uuid/$DISK_UUID" /gnu
+fi
+if ! mountpoint -q /gnu; then
+	log critical "CRITICAL: /gnu mount failed"
+	exec /sbin/agetty --noclear -a root tty1 linux
+fi
+log info "/gnu ok"
+
+mkdir -p /run/shepherd /var/run/shepherd /var/log/shepherd
+chmod 700 /run/shepherd /var/run/shepherd
+
+log info "rc.init start rl=$rl"
+
+# Path to the Shepherd binary (store path if installed via Guix, else the
+# Void/guix-package location).
+SHEPHERD=/usr/local/bin/shepherd
+if [ ! -x "$SHEPHERD" ] && [ -x /gnu/current-guix-profile/bin/shepherd ]; then
+	SHEPHERD=/gnu/current-guix-profile/bin/shepherd
+fi
+
+if [ ! -x "$SHEPHERD" ]; then
+	log "CRITICAL: no shepherd binary found"
+	exec /sbin/agetty --noclear -a root tty1 linux
+fi
+
+log info "Using $SHEPHERD"
+
+# Launch Shepherd once (idempotent: if it is already running, skip).  The
+# daemon loads /etc/shepherd/config.scm, which calls
+# (start-in-the-background '(fully-online)) and brings the whole graph up
+# via its dependency requirements.
+if [ ! -S /run/shepherd/socket ]; then
+	"$SHEPHERD" \
+		-s /run/shepherd/socket \
+		-c /etc/shepherd/config.scm \
+		-l /var/log/shepherd.log \
+		-I >/dev/null 2>&1 &
+	i=0
+	while [ ! -S /run/shepherd/socket ] && [ "$i" -lt 150 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+fi
+
+if [ ! -S /run/shepherd/socket ]; then
+	log critical "CRITICAL: shepherd socket not created"
+	log critical "--- /var/log/shepherd.log ---"
+	tail -n 40 /var/log/shepherd.log >>"$LOGFILE" 2>/dev/null || true
+	log critical "Falling back to emergency getty"
+	exec /sbin/agetty --noclear -a root tty1 linux
+fi
+
+log info "SUCCESS: shepherd up, config loaded"
+
+# Mirror Shepherd's lifecycle log to the console with a colored spinner.
+# Shepherd logs every "Starting service ...", "...has been started.", and
+# failure line to the file given by `-l` above, so this tracks the real graph.
+(
+	current_svc=""
+	spinner_pid=""
+
+	spin() {
+		svc="$1"
+		i=0
+		chars='-\|/'
+		while true; do
+			printf '\r\033[0;36m→ Starting %-20s %s\033[0m' "$svc" "${chars:$i:1}" >/dev/console 2>/dev/null || true
+			i=$(( (i + 1) % 4 ))
+			sleep 0.1
+		done
+	}
+
+	tail -n 0 -F /var/log/shepherd.log 2>/dev/null |
+	while IFS= read -r line; do
+		case "$line" in
+		*"Starting service "*)
+			[ -n "$spinner_pid" ] && kill "$spinner_pid" 2>/dev/null
+			wait "$spinner_pid" 2>/dev/null
+
+			svc=$(echo "$line" | sed -n 's/.*Starting service \([^.]*\).*/\1/p')
+			current_svc="$svc"
+			spin "$svc" &
+			spinner_pid=$!
+			;;
+		*"has been started."*)
+			[ -n "$spinner_pid" ] && kill "$spinner_pid" 2>/dev/null
+			wait "$spinner_pid" 2>/dev/null
+			spinner_pid=""
+
+			svc=$(echo "$line" | sed -n 's/.*Service \([^ ]*\) has been started.*/\1/p')
+			printf '\r\033[1;32m✓ Service %-20s started\033[0m\n' "$svc" >/dev/console 2>/dev/null || true
+			current_svc=""
+			;;
+		*"has been disabled."*|*"failed to start"*|*"Respawning too fast"*|*"is currently disabled."*)
+			[ -n "$spinner_pid" ] && kill "$spinner_pid" 2>/dev/null
+			wait "$spinner_pid" 2>/dev/null
+			spinner_pid=""
+
+			svc=$(echo "$line" | sed -n 's/.*Service \([^ ]*\).*/\1/p')
+			[ -z "$svc" ] && svc="$current_svc"
+			[ -z "$svc" ] && svc="unknown"
+			printf '\r\033[1;31m✗ Service %-20s failed\033[0m\n' "$svc" >/dev/console 2>/dev/null || true
+			current_svc=""
+			;;
+		esac
+	done
+) &
+
+log info "rc.init finished OK"

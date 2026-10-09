@@ -1,0 +1,4 @@
+graph { flow: south; }
+[ Layer 1: dracut initramfs \n hardware discovery, storage, mount root ] { shape: rect; } -> 
+[ Layer 2: s6-linux-init \n mount @/@gnu, @log, mkdir control dirs ] { shape: rect; } -> 
+[ Layer 3: GNU Shepherd 0.10.5 \n root-rw, pseudo-filesystems, cgroups, udev ] { shape: rect; }

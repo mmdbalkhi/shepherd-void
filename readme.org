@@ -1,0 +1,330 @@
+#+TITLE:     s6-linux-init + Shepherd boot configuration
+#+AUTHOR:    Komeil Parseh
+#+EMAIL:     komeilparseh@disroot.org
+#+date: <2026-10-09 Fri>
+#+DESCRIPTION:  Literary source of truth: how this host boots with s6 (stage 0 only) and GNU Shepherd.
+#+OPTIONS:    toc:nil num:nil author:nil e:t
+#+LICENSE: CC0 1.0
+#+language: en
+#+OPTIONS: toc:3 author:t timestamp:t num:t tags:nil
+#+STARTUP: content indent showall
+#+LANGUAGE:   en
+#+PROPERTY:   header-args:sh      :tangle no
+#+PROPERTY:   header-args:scheme  :tangle no
+
+* Introduction
+
+This is the only documentation this boot stack needs.  It describes, end to
+end, how a single Void Linux root with a Guix-installed Shepherd ~0.10.5~ (and a
+Guile ~3.0.9~) comes up, and how to add a new service to it.[fn:why-not]
+
+A machine has one service manager, not three.  Here it is #4, with s6 reduced
+to the smallest thing that makes that possible.
+
+#+BEGIN_marginnote
+=guix build shepherd= resolves to the store path of Shepherd; the symlink keeps
+=/usr/local/bin/shepherd= stable across profile generations. [[info:(guix)Invoking guix Commands][guix build]]
+See the Guix manual for details on profile generation stability.
+#+END_marginnote
+
+* The three layers
+
+#+begin_src text :tangle no
++--------------------------------------------+
+|         Layer 1: dracut initramfs          |
+|  hardware discovery, storage, mount root   |
++--------------------------------------------+
+                     |
+                     |
+                     v
++--------------------------------------------+
+|           Layer 2: s6-linux-init           |
+|    mount @gnu, @log, mkdir control dirs    |
++--------------------------------------------+
+                     |
+                     |
+                     v
++--------------------------------------------+
+|        Layer 3: GNU Shepherd 0.10.5        |
+| root-rw, pseudo-filesystems, cgroups, udev |
++--------------------------------------------+
+#+end_src
+
+S6's only job is Layer 2: bring the store and runtime writable, then hand
+control to Shepherd with =(exec)=. Shepherd then runs the whole graph; s6
+does /not/ manage services.
+
+
+#+BEGIN_SRC sh :tangle no :exports code
+#!/bin/sh -e
+# s6 stage 0 -> Shepherd handoff.  Regenerate with:
+#   s6-linux-init-maker -b /etc/s6-linux-init/skel <more options>
+DISK_UUID=abcd-...
+
+# --- 1. mount what Shepherd/store need (idempotent) ---
+mountpoint -q /gnu     || mount -t btrfs -o subvol=@/@gnu,noatime /dev/disk/by-uuid/$DISK_UUID /gnu \
+                       || mount -t btrfs -o subvol=@gnu,noatime       /dev/disk/by-uuid/$DISK_UUID /gnu
+mountpoint -q /var/log || mount -t btrfs -o subvol=@log,noatime       /dev/disk/by-uuid/$DISK_UUID /var/log
+mountpoint -q /var/tmp || mount -t btrfs -o subvol=@tmp,noatime       /dev/disk/by-uuid/$DISK_UUID /var/tmp
+mountpoint -q /var/cache || mount -t btrfs -o subvol=@cache,noatime   /dev/disk/by-uuid/$DISK_UUID /var/cache
+
+# --- 2. exec Shepherd (PID 1) ---
+SHEPHERD=/usr/local/bin/shepherd    # or /gnu/current-guix-profile/bin/shepherd
+[ -x "$SHEPHERD" ] || exec /sbin/agetty --noclear -a root tty1 linux
+mkdir -p /run/shepherd
+"$SHEPHERD" -c /etc/shepherd/config.scm -s /run/shepherd/socket \
+            -l /var/log/shepherd.log -I
+#+END_SRC
+
+#+BEGIN_marginnote
+The generator writes =current/scripts/rc.init= from =skel/rc.init=.  Edit the
+=skel= copy and re-run =s6-linux-init-maker= — never patch =current= directly.
+#+END_marginnote
+
+
+* Shepherd's graph
+
+Shepherd does not have a "boot script". It has a dependency graph and a
+target symbol that means "everything that must be up"; starting that symbol
+resolves and runs the whole graph in parallel.
+
+The targets live in =services.d/28-boot-stages.scm= [fn:stages]
+
+#+BEGIN_SRC scheme :tangle no
+(define boot-critical   '(root-rw pseudo-filesystems runtime-dirs
+                          static-device-nodes kernel-modules cgroups udev
+                          udev-settle file-systems hostname log-files syslog
+                          sysctl random-seed dmesg swap guix-daemon))
+(define boot-ready      '(pseudo-filesystems cgroups udev udev-settle file-systems
+                          hostname runtime-directories log-files syslog random-seed))
+(define interactive     '(boot-ready agetty-tty1..6))
+(define fully-online    '(interactive loopback dbus polkit elogind seatd
+                          acpid network-manager zram openssh chrony))
+#+END_SRC
+
+Boot DAG (what actually gates the gettys):
+
+#+BEGIN_EXAMPLE :tangle no
+                          root-rw
+                       ───┬──────┬──────────────┐
+         pseudo-filesystems cgroups    runtime-dirs
+       (proc sys run dev ┌──cgroup2  (mkdir /run, /run/user
+        dev-pts dev-shm  └──cgroup-v1 runtime-dirs)
+        securityfs mqueue              │
+        efivarfs)                      │
+                       udev ─ udev-settle ─────────┤
+                          │ static-device-nodes    │
+                   file-systems ─ swap ────────────┤
+                          │ hostname               │
+                   log-files ─ syslog ─────────────┤
+                 kernel-modules ─ random-seed ─────┤
+                          │                        │
+                      boot-ready ─ agetty-tty1..6 ─┤
+                          │                        │
+                interactive ─ loopback ─ dbus ─────┤
+                          │            polkit  │   │
+                 fully-online ─ network-manager ───┘
+
+                   seatd · acpid · zram · ssh · chrony
+                         (float — do NOT gate login)
+#+END_EXAMPLE
+
+#+BEGIN_marginnote
+The solid lines are =#:requirement= edges. Gettys depend on =boot-ready=,
+not on network/D-Bus/desktop, so a slow link or GUI never blanks the login
+prompt.  =udev= is =eudev= from Void (Shepherd just supervises it); device
+nodes are pre-seeded by =05-static-devnodes.scm= for udev's very first run.
+[[https://wiki.archlinux.org/title/Udev][Udev (ArchWiki)]] covers the rules format.
+#+END_marginnote
+
+
+* Add a service (template + worked example)
+
+Every service is a ~(service '(provides) #:requirement '(...) #:start ...)~.
+That /is/ the configuration: declare what it /is/, what it /waits on/, and
+what it /does/, and never a serial =start= ladder.
+
+Template (copy to =services.d/NN-name.scm=):
+
+#+BEGIN_SRC scheme :tangle no
+;; NN-name.scm --- one line.
+
+;; Why it exists: <sentence>.  Why that dependency list: <edges>.
+(define name
+  (service '(name alias)
+    #:documentation "Human sentence."
+    #:requirement '(the-services-it-cannot-run-without)
+    #:start  (make-forkexec-constructor '("name" "args" …)
+                  #:log-file "/var/log/name.log")
+    #:stop   (make-kill-destructor)
+    #:respawn? #t))            ; one-shot? #t for transient steps
+
+(register-services (list name))
+#+END_SRC
+
+Checklist:
+1. Add the file (zero-padded =NN= sorts before 28-boot-stages).
+2. Pick /real/ provides (a list of symbols; not a string, not a list-in-a-list) and the minimal =#:requirement=.
+3. For daemons: argv list + =#:log-file= + =make-kill-destructor= + =#:respawn? #t=.
+4. For one-shots (=mkdir=, =swapon=, =keygen=): =#:start= thunk/~run-or-ignored~ + =#:one-shot? #t= + =#:stop (const #t)=.
+5. Wire it into a stage: edit the =#:requirement= of =interactive= or =fully-online='s =stage= in 28-boot-stages if it should be part of one.[fn:addto]
+6. Reload: =herd load config.scm=.  Shepherd restarts only what changed; already-running services are untouched.
+
+** example: /syncthing/ as a system service ([fn:syncthing]):
+
+#+BEGIN_SRC scheme :tangle no
+;;; 31-syncthing-example.scm --- Syncthing daemon
+
+;; Needs: network up (network-manager), persistent data on disk (file-systems),
+;; and an unprivileged user + homedir.  Not required for login, so it lives in
+;; ~fully-online~ and floats behind the gettys.
+(define syncthing
+  (service '(syncthing)
+    #:documentation "Syncthing file synchronizer (system instance)."
+    #:requirement '(network-manager file-systems)
+    #:start (make-forkexec-constructor
+             '("/usr/bin/syncthing" "-no-browser" "-gui-address=0.0.0.0:8384")
+             #:log-file "/var/log/syncthing.log")
+    #:stop (make-kill-destructor)
+    #:respawn? #t))
+
+(register-services (list syncthing))
+#+END_SRC
+
+To enable: =cp= the file into =/etc/shepherd/services.d/=, add =syncthing= to
+the =fully-online= =stage= requirements in =28-boot-stages.scm=, then =herd load config.scm=.
+A new =syncthing= service appears in =herd status= with no
+Shepherd restart.[fn:syncthingurl]
+
+#+BEGIN_marginnote
+[[https://www.syncthing.net/][Syncthing]] ships a systemd unit that does the same =network-online +
+filesystem= dance; this is the manual port.  For a per-user GUI session, put
+the same service under =user-shepherd/services.d/= with =GUIX_PROFILE= set.
+#+END_marginnote
+
+
+* Runtime model (what you observe at boot)
+
+- =/etc/shepherd/config.scm= loads =services.d/*.scm=, then =(start-in-the-background '(fully-online))=.
+- Shepherd resolves requirements breadth-first and /starts them concurrently/ where the graph allows.[fn:par]
+  You see interleaved =Starting service X= / =Service X has been started.= lines in =/var/log/shepherd.log=.
+- A service whose =#:start= throws is marked failed; dependents are skipped / retried, logged,
+  and the boot continues on other branches — one bad daemon never hangs the whole boot.[fn:fail]
+- =boot-ready= is the barrier behind which gettys wait; =fully-online= is everything else that is allowed to lag.
+
+#+BEGIN_SRC text :tangle no
+$ herd status                   # on the running machine
+root                            (running)   uptime 00:00:47
+udev                            (running)   uptime 00:00:46
+syslog                          (running)   uptime 00:00:45
+boot-ready                      (stopped)   start it to unblock login
+agetty-tty1                     (running)   uptime 00:00:44
+fully-online                    (stopped)   start it to bring the rest
+$ tail -f /var/log/shepherd.log  # the spinner feeds this
+2026-... Starting service udev...
+2026-... Service udev has been started.
+#+END_SRC
+
+#+BEGIN_marginnote
+Shepherd also exposes =herd = the CLI.  =herd help=, =herd doc <service>=, and
+=[[info:(shepherd)Invoking shepherd][info:(shepherd)]]= cover every flag.
+#+END_marginnote
+
+
+* Layout
+
+#+BEGIN_SRC text :tangle no
+shepherd/
+├── readme.org                    <- you are here
+├── config.scm                    <- Shepherd config entry point
+├── services.d/
+│   ├── 00-utilities.scm          <- shared helpers (no services)
+│   ├── 01-root.scm               <- root-rw remount
+│   ├── 02-pseudo-fs.scm          <- proc/sys/run/dev/+
+│   ├── 03-runtime-directories.scm
+│   ├── 04-cgroups.scm            <- unified | hybrid | legacy
+│   ├── 05-static-devnodes.scm
+│   ├── 07-udev.scm               <- udev + udev-settle
+│   ├── 08-file-systems.scm       <- mount -a + swap
+│   ├── 09-hostname.scm
+│   ├── 10-sysctl.scm
+│   ├── 11-swap.scm
+│   ├── 12-dmesg.scm
+│   ├── 13-random-seed.scm        <- seedrng
+│   ├── 14-log-files.scm
+│   ├── 15-syslog.scm             <- socklog -> /dev/log
+│   ├── 16-guix-daemon.scm
+│   ├── 17-getty.scm              <- agetty-tty1..6
+│   ├── 18-loopback.scm
+│   ├── 19-dbus.scm               <- dbus + dbus-runtime dir
+│   ├── 20-network.scm            <- NetworkManager (dhcpcd opt-in)
+│   ├── 21-polkit.scm
+│   ├── 22-elogind.scm            <- D-Bus-activated, one-shot pin
+│   ├── 23-seatd.scm
+│   ├── 24-acpid.scm
+│   ├── 25-zram.scm
+│   ├── 26-openssh.scm
+│   ├── 27-chrony.scm
+│   └── 28-boot-stages.scm        <- boot-ready/interactive/fully-online
+├── s6-linux-init/
+│   └── skel/rc.init              <- stage-0 handoff (edit here)
+└── user-shepherd/                <- per-user Shepherd (sway etc.)       (WIP)
+    ├── config.scm
+    └── services.d/sway.scm
+#+end_src
+
+
+* Install & bring up (manual)
+
+#+BEGIN_SRC sh :tangle no
+# 1. Shepherd config    ->    where rc.init expects it
+cp services.d/*.scm           /etc/shepherd/services.d/
+cp config.scm                 /etc/shepherd/config.scm
+
+# 2. Shepherd binary visible to rc.init (one of:)
+ln -s $(guix build shepherd)/bin/shepherd /usr/local/bin/shepherd       # Guix
+# or:  ln -s $(which shepherd) /usr/local/bin/shepherd                  # Void
+
+# 3. s6 stage 0 from the skel (regenerates current/scripts/rc.init)
+s6-linux-init-maker -b /etc/s6-linux-init/skel \
+  -u shepherd -g shepherd \
+  -s /run/s6-svscan \
+  -m /etc/s6-linux-init/monitor
+
+# 4. Boot it (or reboot)
+exec /etc/s6-linux-init/current/scripts/rc.init default
+#+END_SRC
+
+#+BEGIN_marginnote
+=guix build shepherd= resolves to the store path of Shepherd; the symlink keeps
+=/usr/local/bin/shepherd= stable across profile generations.  [[info:(guix)Invoking guix Commands][=guix build=]]
+#+END_marginnote
+
+
+* Footnotes
+[fn:why-not] /Why not just use Guix System's =operating-system= /services/?
+Because owning =dracut -> s6 -> Shepherd= explicitly makes every failure mode
+legible and avoids Guix SD's implicit service graph. This repo is that explicit graph.
+
+[fn:stages] Shepherd has no *runlevel*.  A =stage= here is a =service= whose =#:start= is =(const #t)=
+i.e. a named barrier whose only purpose is its =#:requirement=, so the DAG is readable from one file.
+See [[info:(shepherd)Service Types][info:(shepherd)Service Types]] and =services.d/28-boot-stages.scm=.
+
+[fn:addto] The stage =#:requirement= list is the "what must be up before X is considered up" contract.
+Add your symbol there to make it part of an ordered phase; leave it out and it only starts if something
+else pulls it in.
+
+[fn:syncthing] Syncthing is a fine =fully-online= citizen: network-bound, not login-critical,
+restart-on-crash via =#:respawn? #t=. The example intentionally uses the =system= instance;
+for a desktop session move it to =user-shepherd=, set =HOME= and =XDG_CONFIG_HOME=, and require =seatd=.
+
+[fn:syncthingurl] [[https://github.com/syncthing/syncthing/blob/main/README.md][syncthing/README]] · its systemd unit =network-online.target + local-fs.target=
+maps exactly to =network-manager + file-systems= here.
+
+[fn:par] =start-in-the-background= (from =services.d/config.scm=) spawns a fiber that calls
+=start-in-parallel=: each node's =#:requirement= starts first, and siblings with no edge
+between them start concurrently.  [[https://www.gnu.org/software/shepherd/manual/shepherd.html][Shepherd manual]] §"Dependency resolution".
+
+[fn:fail] Failures are per-service. Shepherd logs =Exception caught while starting X= to
+=/var/log/shepherd.log=, marks the service failed, and continues other branches rather than
+aborting the boot.  That is intentional: a one-shot =random-seed= failing must not stop =udev=.
