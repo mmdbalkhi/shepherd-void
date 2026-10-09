@@ -12,14 +12,19 @@
       "/usr/sbin/agetty"))
 
 (define* (make-agetty tty #:optional (extra-args '()))
-  "Return a respawning agetty service for TTY (e.g. \"tty1\").
-EXTRA-ARGS is a list of extra agetty arguments."
+  "Return a respawning agetty service for TTY."
   (service
    (list (string->symbol (string-append "agetty-" tty)))
    #:documentation (string-append "Getty on " tty)
    #:requirement '(boot-ready)
    #:start (make-forkexec-constructor
-            `(,(agetty-binary) "--noclear" ,tty "linux" ,@extra-args)
+            `(,(agetty-binary) 
+              "--noclear" 
+              "--noissue"       ; <-- Don't wait to display /etc/issue
+              "--local-line"    ; <-- Tell it the line is local (no modem/carrier wait)
+              ,tty 
+              "linux" 
+              ,@extra-args)
             #:log-file (string-append "/var/log/agetty-" tty ".log"))
    #:stop (make-kill-destructor)
    #:respawn? #t))
