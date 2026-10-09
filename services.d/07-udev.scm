@@ -20,10 +20,10 @@
   (service '(udev-settle)
            #:documentation "Trigger udev rules and wait for the queue to settle."
            #:requirement '(udev)
-           #:start (make-system-constructor  ;; TODO: lispify
-                    "udevadm trigger --action=add --type=subsystems 2>/dev/null || true
-              udevadm trigger --action=add --type=devices 2>/dev/null || true
-              udevadm settle 2>/dev/null || true")
+           #:start (lambda _
+                     (system* "udevadm" "trigger" "--action=add" "--type=subsystems")
+                     (system* "udevadm" "trigger" "--action=add" "--type=devices")
+                     (zero? (system* "udevadm" "settle")))
            #:stop (const #t)
            #:one-shot? #t))
 
