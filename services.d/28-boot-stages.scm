@@ -15,31 +15,33 @@
 
 (use-modules (shepherd service))
 
-(define boot-ready
-  (stage 'boot-ready
-         "Barrier: root, devices, filesystems, cgroups, hostname, logging, swap
-are ready.  Gettys may start once this is up."
-         ;; Minimal genuine prerequisites of a usable login: devices enumerated,
-         ;; filesystems mounted, hostname set, a working syslog, random-seed.
-         '(pseudo-filesystems cgroups udev udev-settle
-           file-systems hostname
-           runtime-directories log-files syslog random-seed)))
-
+;; boot-critical: The absolute minimum to get the kernel, storage, and
+;; pseudo-filesystems ready.
 (define boot-critical
   (stage 'boot-critical "Stage 1: core system initialization."
-         '(root-rw pseudo-filesystems runtime-directories static-device-nodes
-           kernel-modules cgroups udev udev-settle file-systems hostname
-           log-files syslog sysctl random-seed dmesg swap guix-daemon boot-ready)))
+         '(root-rw pseudo-filesystems runtime-directories
+           static-device-nodes kernel-modules cgroups udev udev-settle
+           file-systems tmpfs swap sysctl dmesg guix-daemon)))
 
+;; boot-ready: The barrier behind which gettys wait.
+;; Includes user-facing setup like console, timezone, and hwclock.
+(define boot-ready
+  (stage 'boot-ready "Barrier: root, devices, filesystems, hostname, logging,
+and console are ready. Gettys may start once this is up."
+         '(boot-critical hostname log-files syslog random-seed
+           console-setup timezone hwclock)))
+
+;; interactive: Things that require a TTY or user session.
 (define interactive
   (stage 'interactive "Stage 2: local TTYs and user login."
          '(boot-ready agetty-tty1 agetty-tty2 agetty-tty3
            agetty-tty4 agetty-tty5 agetty-tty6)))
 
+;; fully-online: Network and background daemons.
 (define fully-online
   (stage 'fully-online "Stage 3: networking, D-Bus, seat/session, SSH, and friends.
 These deliberately do NOT gate the gettys."
          '(interactive loopback dbus polkit elogind seatd acpid
                        network-manager zram openssh chrony)))
 
-(register-services (list boot-ready boot-critical interactive fully-online))
+(register-services (list boot-critical boot-ready interactive fully-online))
