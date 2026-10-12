@@ -27,8 +27,15 @@
                                  ("install" "-m0600" "-o" "root" "-g" "utmp" "/dev/null" "/var/log/btmp")
                                  ("install" "-m0600" "-o" "root" "-g" "utmp" "/dev/null" "/var/log/lastlog")))
 
-                     ;; 2. Mark the boot in wtmp (we borrow void's 05-misc.sh `halt -B`)
-                     (system* "halt" "-B")
+                      ;; 2. Boot marker in /var/log/wtmp (so `last` shows the boot).
+                      ;;    Void's `halt -B' idiom is unsafe here: on this host
+                      ;;    /bin/halt is a `herd` proxy that *reboots* (and now
+                      ;;    that /usr/local/bin is on PATH at boot, `halt -B`
+                      ;;    would actually trigger a reboot during boot).
+                      ;;    Writing a wtmp BOOT_TIME record needs a proper utmp
+                      ;;    writer (pututxline/utmpdump); until one is wired in,
+                      ;;    skip it rather than risk a boot-time reboot.
+                      ;;    (See services.d/29-power.scm for the real shutdown.)
 
                      ;; 3. socklog spool setup
                      (system* "mkdir" "-p" "/var/log/socklog")
