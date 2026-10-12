@@ -28,6 +28,8 @@
 ;;     -> sway-session barrier resolves
 ;;   `herd restart sway` / `herd restart pipewire` / etc. all work.
 
+(define-module (shepherd config)
+              #:declarative? #f)
 (use-modules (shepherd service)
              ((ice-9 ftw) #:select (scandir)))
 
