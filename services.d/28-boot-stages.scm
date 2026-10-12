@@ -16,12 +16,16 @@
 (use-modules (shepherd service))
 
 ;; boot-critical: The absolute minimum to get the kernel, storage, and
-;; pseudo-filesystems ready.
+;; pseudo-filesystems ready.  guix-daemon is NOT here: on a foreign distro
+;; (Void) the Guix store libraries live in /gnu/store/* and a
+;; garbage-collected dependency causes exit 127.  Since Shepherd is the
+;; only Guix component needed at boot, guix-daemon was moved to
+;; ~fully-online~ and made non-respawning (see 16-guix-daemon.scm).
 (define boot-critical
   (stage 'boot-critical "Stage 1: core system initialization."
          '(root-rw pseudo-filesystems runtime-directories
            static-device-nodes kernel-modules cgroups udev udev-settle
-           file-systems tmpfs swap sysctl dmesg guix-daemon)))
+           file-systems tmpfs swap sysctl dmesg)))
 
 ;; boot-ready: The barrier behind which gettys wait.
 ;; Includes user-facing setup like console, timezone, and hwclock.
@@ -41,7 +45,7 @@ and console are ready. Gettys may start once this is up."
 (define fully-online
   (stage 'fully-online "Stage 3: networking, D-Bus, seat/session, SSH, and friends.
 These deliberately do NOT gate the gettys."
-         '(interactive loopback dbus polkit elogind seatd acpid
-                       network-manager zram openssh chrony)))
+          '(interactive loopback dbus polkit elogind seatd acpid
+                        network-manager zram openssh chrony guix-daemon)))
 
 (register-services (list boot-critical boot-ready interactive fully-online))
