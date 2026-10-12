@@ -5,9 +5,13 @@
 ;; and the controller enumeration live in Scheme; only each individual ~mount~
 ;; is a single small shell command guarded by an idempotency check.
 
-(use-modules (ice-9 ftw)     ; mkdir-p
-             (srfi srfi-1)   ; filter, filter-map
+(use-modules (srfi srfi-1)   ; filter, filter-map
              (shepherd service))
+
+;; mkdir-p is NOT exported by (ice-9 ftw) in Guile 3.0.9 from Guix store.
+;; Use system* "mkdir" "-p" instead — this is the robust, portable approach.
+(define (ensure-dir dir)
+  (zero? (system* "mkdir" "-p" dir)))
 
 (define %cgroup-mode
   ;; Mirrors Void's /etc/rc.conf CGROUP_MODE (default: unified; this box).
@@ -42,7 +46,7 @@
 (define (mount-node type source target opts)
   "Mount a cgroup node, idempotently: skip when already a mount point."
   (unless (mountpoint-q? target)
-    (mkdir-p target)
+    (ensure-dir target)
     (system (string-append "mount -t " type
                            (if (null? opts) ""
                                (string-append " -o " (string-join opts ",")))
@@ -57,7 +61,7 @@
   "Mount cgroup v1 tmpfs + per-controller hierarchies (legacy/hybrid only)."
   (when (member %cgroup-mode '("legacy" "hybrid"))
     (unless (mountpoint-q? "/sys/fs/cgroup")
-      (mkdir-p "/sys/fs/cgroup")
+      (ensure-dir "/sys/fs/cgroup")
       (system "mount -t tmpfs cgroup_root /sys/fs/cgroup"))
     (for-each
      (lambda (controller)
