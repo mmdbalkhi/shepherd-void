@@ -8,8 +8,8 @@
 ;; for legacy clients.
 ;;
 ;; The audio stack does NOT depend on graphical-session. it works headless
-;; and can start before Sway.  Each daemon runs in the foreground (--no-daemon
-;; / --foreground) so Shepherd can supervise it.
+;; and can start before Sway.  pipewire runs in the foreground by default
+;; (no --no-daemon needed — that flag doesn't exist on Void's pipewire).
 
 (define pipewire
   (service '(pipewire)
@@ -17,7 +17,7 @@
            #:requirement '(dbus)
            #:start
            (make-forkexec-constructor
-            (list (binary "pipewire") "--no-daemon")
+            (list (binary "pipewire"))
             #:environment-variables (base-env)
             #:log-file (log-file "pipewire"))
            #:stop (make-kill-destructor)
@@ -41,7 +41,7 @@
            #:requirement '(wireplumber)
            #:start
            (make-forkexec-constructor
-            (list (binary "pipewire-pulse") "--no-daemon")
+            (list (binary "pipewire-pulse"))
             #:environment-variables (base-env)
             #:log-file (log-file "pipewire-pulse"))
            #:stop (make-kill-destructor)
