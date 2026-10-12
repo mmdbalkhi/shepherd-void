@@ -4,8 +4,7 @@
 ;; (mount-option formatting, idempotent mountpoint checks) so that individual
 ;; service files read like declarative data, not shell.
 
-(use-modules (ice-9 ftw)   ; mkdir-p
-             (srfi srfi-1) ; filter
+(use-modules (srfi srfi-1) ; filter
              (shepherd service))
 
 (define (opts->string opts)
@@ -21,11 +20,7 @@ The empty / ~('default')~ list renders as ''."
 
 (define (ensure-dir dir)
   "Create DIR and parents."
-  (catch 'system-error
-    (lambda () (mkdir-p dir))
-    (lambda args (if (and (pair? args)
-                          (= EEXIST (system-error-errno args)))
-                     #f (apply throw args)))))
+  (zero? (system* "mkdir" "-p" dir)))
 
 (define (run-or-ignored command . args)
   "Run the primitive COMMAND (an absolute path) with ARGS, treating absence or
