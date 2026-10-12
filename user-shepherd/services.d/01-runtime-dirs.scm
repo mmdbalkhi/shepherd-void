@@ -5,8 +5,6 @@
 ;; and every dbus-dependent child can find the user session bus at a
 ;; predictable path.  This is a no-op when XDG_RUNTIME_DIR is already set
 ;; correctly (idempotent).
-(use-modules (ice-9 ftw)   ; mkdir-p
-             )
 (define runtime-dirs
   (service '(runtime-dirs)
            #:documentation
@@ -18,7 +16,7 @@ Shepherd process so all child services inherit them."
              (let ((rt (or (getenv "XDG_RUNTIME_DIR")
                            (string-append "/run/user/"
                                           (number->string (getuid))))))
-               (mkdir-p rt)
+               (false-if-exception (mkdir-p rt))
                (setenv "XDG_RUNTIME_DIR" rt)
                (setenv "DBUS_SESSION_BUS_ADDRESS"
                        (string-append "unix:path=" rt "/bus"))
