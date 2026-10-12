@@ -8,18 +8,20 @@
   (service '(dmesg)
            #:documentation "Save the kernel ring buffer to /var/log/dmesg.log."
            #:requirement '(root-rw file-systems)
-           #:start (lambda _
-                     (with-output-to-file "/var/log/dmesg.log"
-                       (lambda () (system* "dmesg")))
-                     (let ((restrict? (catch 'system-error
-                                        (lambda ()
-                                          (let ((port (open-pipe* OPEN_READ "sysctl" "-n" "kernel.dmesg_restrict")))
-                                            (let ((val (read-line port)))
-                                              (close-pipe port)
-                                              (string=? (string-trim-both val) "1"))))
-                                        (lambda args #f))))
-                       (apply system* "chmod" (if restrict? '("0600") '("0644")) '("/var/log/dmesg.log")))
-                     #t)
+            #:start (lambda _
+                      (with-output-to-file "/var/log/dmesg.log"
+                        (lambda () (system* "dmesg")))
+                      (let ((restrict? (catch 'system-error
+                                         (lambda ()
+                                           (let ((port (open-pipe* OPEN_READ "sysctl" "-n" "kernel.dmesg_restrict")))
+                                             (let ((val (read-line port)))
+                                               (close-pipe port)
+                                               (string=? (string-trim-both val) "1"))))
+                                         (lambda args #f))))
+                        (let ((mode (if restrict? "0600" "0644")))
+                          (false-if-exception
+                            (system* "chmod" mode "/var/log/dmesg.log"))))
+                      #t)
            #:stop (const #t)
            #:one-shot? #t))
 
