@@ -16,13 +16,25 @@
 ;;    targets (boot-ready, interactive, fully-online, ...) live in
 ;;    ~28-boot-stages.scm~.
 (define (load-services dir)
-  (for-each
-   (lambda (file)
-     (load (string-append dir "/" file)))
-   (scandir dir
-            (lambda (f)
-              (and (string-suffix? ".scm" f)
-                   (not (string-prefix? "." f)))))))
+  (let ((files (scandir dir
+                  (lambda (f)
+                    (and (string-suffix? ".scm" f)
+                         (not (string-prefix? "." f)))))))
+    ;; Guard: warn about old-style (unnumbered) files that shadow numbered
+    ;; ones.  Digits sort before letters in ASCII (0x30 < 0x61), so
+    ;; 15-syslog.scm loads BEFORE socklog.scm.  The unnumbered file then
+    ;; silently overrides the canonical definition -- this was the root cause
+    ;; of the socklog 127 / respawn-too-fast cascades on the Void host.
+    (let ((stale (filter (lambda (f)
+                           (not (char-numeric? (string-ref f 0))))
+                         files)))
+      (when (pair? stale)
+        (format #t "WARNING: old-style (unnumbered) service files shadow numbered files:\n  ~a\nThese load AFTER the numbered files and silently override them.\nRemove them: rm ~a/*.scm (the unnumbered ones)\n\n"
+                (string-join stale ", ") dir)))
+    (for-each
+     (lambda (file)
+       (load (string-append dir "/" file)))
+     files)))
 
 (load-services %services-dir)
 
