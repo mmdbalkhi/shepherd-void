@@ -18,7 +18,9 @@
                     (system* "modprobe" "-bq" mod)))))
             (loop (read-line port)))))
       (lambda args #f))
-    (close-pipe port)))
+      (catch 'system-error
+        (lambda () (close-pipe port))
+        (lambda args #f))))
 
 (define static-device-nodes
   (service '(static-device-nodes)
