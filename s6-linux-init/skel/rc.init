@@ -1,5 +1,5 @@
-#!/bin/sh -e
-
+#!/usr/bin/bash
+#
 # s6-linux-init stage-0 -> Shepherd handoff.
 #
 # This file lives in the s6-linux-init *skeleton* (skel/rc.init), not in
@@ -9,121 +9,123 @@
 # survive rebuilds.
 #
 # This script does THREE things and no more:
-#   1. ensure /gnu, /var/log, /var/tmp, /var/cache, /var/run exist and are
-#      mounted (the minimal set Shepherd + the store need before it can run),
+#   1. mount /gnu, /var/log, /var/tmp (the minimal set Shepherd + the store
+#      need before it can run), mount a fresh tmpfs on /run, and create the
+#      runtime tree (/run/shepherd, /var/log/shepherd).  /var/cache is NOT
+#      mounted here (xbbs cache only, @pkg subvol); fstab handles it.
 #   2. launch the Shepherd daemon (init.scm then drives the whole graph via
-#      its dependency requirements),
+#      its dependency requirements).
 #   3. tail Shepherd's logfile to the console with a colored spinner.
 # Nothing past this point is managed by s6 -- Shepherd owns udev, dbus,
 # networking, gettys, sway, etc.
+#
+# NOTE: s6-linux-init supervises this stage-1 script but does NOT supervise
+# the Shepherd daemon launched here -- Shepherd is bg'd and orphaned.  If it
+# ever exits, the socket disappears and stays gone until the next boot, so
+# `herd' reports "no socket".  Keep boot steps below from deleting /run.
+set -Eeuo pipefail
 
-rl="$1"
-shift
+# /usr/local/bin holds the `herd` and `shepherd` symlinks (into /gnu/store).
+# Services launched by Shepherd inherit this PATH; without it any service that
+# shells out to `herd` fails at boot (e.g. the old `halt -B' boot-marker).
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin
 
-DISK_UUID=EDIT_THIS
+# Optionally pull in the live Guix profile so daemons/tools upgraded later via
+# `guix package` are visible to services launched further down.  Non-fatal: the
+# /usr/local/bin shim above already guarantees `herd' is resolvable when
+# s6-linux-init itself runs.  /run/current-guix-profile may not exist yet this
+# early (activation creates it); sourcing a missing script is skipped.
+if [ -r /etc/profiles/guix.sh ]; then
+	# shellcheck disable=SC1091
+	. /etc/profiles/guix.sh 2>/dev/null || \
+		echo "rc.init: warning: /etc/profiles/guix.sh failed to source" >/dev/console 2>/dev/null || true
+fi
+
+rl="${1:-default}"
+[ $# -gt 0 ] && shift || true
+
+DISK_UUID=bded8bd1-ce84-47a6-8a90-0d0495f68111
 LOGFILE=/var/log/s6-shepherd-boot.log
 CONSOLE_LOGLEVEL=4
-
 if grep -q 'loglevel=[7-9]' /proc/cmdline 2>/dev/null; then
 	CONSOLE_LOGLEVEL=7
 fi
 
-_log() {
-	# $1 = level, $2 = msg, $3 = color
-	echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" >>"$LOGFILE" 2>/dev/null || true
-	printf "${3}%s\033[0m\n" "$2" >/dev/console 2>/dev/null || true
-}
-
+# verbose + strict logger: always appends to $LOGFILE, prints color to /dev/console.
+# usage: log <level> <msg>
 log() {
-	level="${1:-info}"
-	shift
-	msg="$*"
-	color=""
-
+	local level="${1:-info}" msg="$2" color=""
 	case "$level" in
-	critical | error)
-		color='\033[1;31m' # red
-		_log "$level" "$msg" "$color"
-		;;
-	warn)
-		color='\033[1;33m' # yellow
-		_log "$level" "$msg" "$color"
-		;;
-	debug)
-		color='\033[0m' # no colour
-		[ "$CONSOLE_LOGLEVEL" -ge 7 ] && _log "$level" "$msg" "$color"
-		;;
-	info)
-		color='\033[1;32m' # green
-		[ "$CONSOLE_LOGLEVEL" -ge 6 ] && _log "$level" "$msg" "$color"
-		;;
-	*)
-		color='\033[0m' # no colour
-		_log "$level" "$msg" "$color"
-		;;
+	critical|error) color='\033[1;31m';;
+	warn)           color='\033[1;33m';;
+	debug)          color='\033[0m'; [ "$CONSOLE_LOGLEVEL" -ge 7 ] || return 0;;
+	info)           color='\033[1;32m'; [ "$CONSOLE_LOGLEVEL" -ge 6 ] || return 0;;
+	*)              color='\033[0m';;
 	esac
+	printf '%s [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$msg" >>"$LOGFILE" 2>/dev/null || true
+	printf "${color}%s\033[0m\n" "$msg" >/dev/console 2>/dev/null || true
 }
 
-# /var/run is a compatibility symlink to /run on modern systems.
-if [ ! -e /var/run ]; then
-	ln -sfn /run /var/run
-fi
+# Diagnostic: confirm rc.init is running (bypasses _log which needs /var/log)
+echo "rc.init: starting (rl=$rl)" >/dev/console 2>/dev/null || true
+log info "rc.init start rl=$rl (PATH=$PATH)"
 
+# 1a. /var/log (persistent, btrfs subvol so crash logs survive reboot)
 mkdir -p /var/log
-if ! mountpoint -q /var/log 2>/dev/null; then
-	mount -t btrfs -o subvol=@log,noatime "/dev/disk/by-uuid/$DISK_UUID" /var/log || true
-fi
+mountpoint -q /var/log 2>/dev/null || \
+	mount -t btrfs -o subvol=@log,noatime "/dev/disk/by-uuid/$DISK_UUID" /var/log \
+	|| log warn "/var/log mount failed (using existing)"
 
+# 1b. /var/tmp
 mkdir -p /var/tmp
-if ! mountpoint -q /var/tmp 2>/dev/null; then
-	mount -t btrfs -o subvol=@tmp,noatime "/dev/disk/by-uuid/$DISK_UUID" /var/tmp || true
-fi
+mountpoint -q /var/tmp 2>/dev/null || \
+	mount -t btrfs -o subvol=@/@tmp,noatime "/dev/disk/by-uuid/$DISK_UUID" /var/tmp \
+	|| log warn "/var/tmp mount failed (using existing)"
 
-mkdir -p /var/cache
-if ! mountpoint -q /var/cache 2>/dev/null; then
-	mount -t btrfs -o subvol=@cache,noatime "/dev/disk/by-uuid/$DISK_UUID" /var/cache || true
-fi
-
+# 1c. /gnu -- the store.  No /gnu, no Shepherd; this is the hard gate.
 mkdir -p /gnu
-if ! mountpoint -q /gnu; then
-	mount -t btrfs -o subvol=@/@gnu,noatime "/dev/disk/by-uuid/$DISK_UUID" /gnu ||
-		mount -t btrfs -o subvol=@gnu,noatime "/dev/disk/by-uuid/$DISK_UUID" /gnu
-fi
-if ! mountpoint -q /gnu; then
-	log critical "CRITICAL: /gnu mount failed"
-	exec /sbin/agetty --noclear -a root tty1 linux
+if ! mountpoint -q /gnu 2>/dev/null; then
+	if ! mount -t btrfs -o subvol=@/@gnu,noatime "/dev/disk/by-uuid/$DISK_UUID" /gnu; then
+		log critical "CRITICAL: /gnu mount failed"
+		exec /sbin/agetty --noclear -a root tty1 linux
+	fi
 fi
 log info "/gnu ok"
 
-mkdir -p /run/shepherd /var/run/shepherd /var/log/shepherd
-chmod 700 /run/shepherd /var/run/shepherd
+# 1d. /run -- fresh tmpfs each boot.  This is the key fix for "Socket deleted;
+#     stopping": /run is recreated empty and deterministic, and we never umount
+#     it from a service.  Idempotent: only mount/mkdir/chmod if not already done.
+mkdir -p /run
+mountpoint -q /run 2>/dev/null || \
+	mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run \
+	|| log warn "/run tmpfs mount failed (proceeding with existing /run)"
+ln -sfnT /run /var/run 2>/dev/null || true
+mkdir -p /run/shepherd
+chmod 700 /run/shepherd
+# /var/log/shepherd holds per-service logs Shepherd's logger pulls here.
+mkdir -p /var/log/shepherd
 
-log info "rc.init start rl=$rl"
+# Ensure the `socklog` group exists before Shepherd starts its services:
+# 14-log-files.scm chowns the /var/log/socklog spool to root:socklog, and
+# without this group every boot logs `chown: invalid group: 'root:socklog'`.
+getent group socklog >/dev/null 2>&1 || groupadd -r socklog 2>/dev/null || log warn "could not create 'socklog' group"
 
-# Path to the Shepherd binary (store path if installed via Guix, else the
-# Void/guix-package location).
+log info "rc.init stage-0 complete, launching Shepherd"
+
+# 1e. /sbin is not where `herd' lives; add it to the boot PATH.
 SHEPHERD=/usr/local/bin/shepherd
-if [ ! -x "$SHEPHERD" ] && [ -x /gnu/current-guix-profile/bin/shepherd ]; then
-	SHEPHERD=/gnu/current-guix-profile/bin/shepherd
-fi
-
+[ -x "$SHEPHERD" ] || SHEPHERD=/gnu/current-guix-profile/bin/shepherd
 if [ ! -x "$SHEPHERD" ]; then
-	log "CRITICAL: no shepherd binary found"
+	log critical "CRITICAL: no shepherd binary found"
 	exec /sbin/agetty --noclear -a root tty1 linux
 fi
-
 log info "Using $SHEPHERD"
 
-# Launch Shepherd once (idempotent: if it is already running, skip).  The
-# daemon loads /etc/shepherd/init.scm, which calls
-# (start-in-the-background '(fully-online)) and brings the whole graph up
-# via its dependency requirements.
+# 1f. Launch Shepherd once. -I = stay in foreground (we bg it); -s socket,
+#     -c config, -l daemon log. Idempotent: skip if a socket is already live.
 if [ ! -S /run/shepherd/socket ]; then
-	"$SHEPHERD" \
-		-s /run/shepherd/socket \
-		-c /etc/shepherd/init.scm \
-		-l /var/log/shepherd.log \
-		-I >/dev/null 2>&1 &
+	"$SHEPHERD" -s /run/shepherd/socket -c /etc/shepherd/init.scm \
+		-l /var/log/shepherd.log -I >/dev/null 2>&1 &
 	i=0
 	while [ ! -S /run/shepherd/socket ] && [ "$i" -lt 150 ]; do
 		sleep 0.1
@@ -138,22 +140,19 @@ if [ ! -S /run/shepherd/socket ]; then
 	log critical "Falling back to emergency getty"
 	exec /sbin/agetty --noclear -a root tty1 linux
 fi
-
 log info "SUCCESS: shepherd up, config loaded"
 
-# Mirror Shepherd's lifecycle log to the console with a colored spinner.
-# Shepherd logs every "Starting service ...", "...has been started.", and
-# failure line to the file given by `-l` above, so this tracks the real graph.
+# 1g. Mirror Shepherd's lifecycle log to the console with a colored spinner.
 (
+	set -e
 	current_svc=""
 	spinner_pid=""
 
 	spin() {
-		svc="$1"
-		i=0
-		chars='-\|/'
+		local svc="$1" i=0 chars='-\|/'
 		while true; do
-			printf '\r\033[0;36m→ Starting %-20s %s\033[0m' "$svc" "${chars:$i:1}" >/dev/console 2>/dev/null || true
+			printf '\r\033[0;36m→ Starting %-20s %s\033[0m' \
+				"$svc" "${chars:$i:1}" >/dev/console 2>/dev/null || true
 			i=$(( (i + 1) % 4 ))
 			sleep 0.1
 		done
@@ -163,33 +162,25 @@ log info "SUCCESS: shepherd up, config loaded"
 	while IFS= read -r line; do
 		case "$line" in
 		*"Starting service "*)
-			[ -n "$spinner_pid" ] && kill "$spinner_pid" 2>/dev/null
-			wait "$spinner_pid" 2>/dev/null
-
-			svc=$(echo "$line" | sed -n 's/.*Starting service \([^.]*\).*/\1/p')
-			current_svc="$svc"
-			spin "$svc" &
+			if [ -n "$spinner_pid" ]; then kill "$spinner_pid" 2>/dev/null || true; fi
+			wait "$spinner_pid" 2>/dev/null || true
+			current_svc=$(printf '%s' "$line" | sed -n 's/.*Starting service \([^.]*\).*/\1/p')
+			spin "$current_svc" &
 			spinner_pid=$!
 			;;
 		*"has been started."*)
-			[ -n "$spinner_pid" ] && kill "$spinner_pid" 2>/dev/null
-			wait "$spinner_pid" 2>/dev/null
+			if [ -n "$spinner_pid" ]; then kill "$spinner_pid" 2>/dev/null || true; fi
+			wait "$spinner_pid" 2>/dev/null || true
 			spinner_pid=""
-
-			svc=$(echo "$line" | sed -n 's/.*Service \([^ ]*\) has been started.*/\1/p')
-			printf '\r\033[1;32m✓ Service %-20s started\033[0m\n' "$svc" >/dev/console 2>/dev/null || true
-			current_svc=""
+			printf '\r\033[1;32m✓ Service %-20s started\033[0m\n' \
+				"$(printf '%s' "$line" | sed -n 's/.*Service \([^ ]*\) has been started.*/\1/p')" >/dev/console 2>/dev/null || true
 			;;
 		*"has been disabled."*|*"failed to start"*|*"Respawning too fast"*|*"is currently disabled."*)
-			[ -n "$spinner_pid" ] && kill "$spinner_pid" 2>/dev/null
-			wait "$spinner_pid" 2>/dev/null
+			if [ -n "$spinner_pid" ]; then kill "$spinner_pid" 2>/dev/null || true; fi
+			wait "$spinner_pid" 2>/dev/null || true
 			spinner_pid=""
-
-			svc=$(echo "$line" | sed -n 's/.*Service \([^ ]*\).*/\1/p')
-			[ -z "$svc" ] && svc="$current_svc"
-			[ -z "$svc" ] && svc="unknown"
-			printf '\r\033[1;31m✗ Service %-20s failed\033[0m\n' "$svc" >/dev/console 2>/dev/null || true
-			current_svc=""
+			printf '\r\033[1;31m✗ Service %-20s failed\033[0m\n' \
+				"$(printf '%s' "$line" | sed -n 's/.*Service \([^ ]*\).*/\1/p')" >/dev/console 2>/dev/null || true
 			;;
 		esac
 	done
