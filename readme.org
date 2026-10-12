@@ -4,26 +4,42 @@
 #+date: <2026-10-09 Fri>
 #+DESCRIPTION:  Literary source of truth: how this host boots with s6 (stage 0 only) and GNU Shepherd.
 #+LICENSE: CC0 1.0
-#+language: en
-#+OPTIONS: toc:3 author:t timestamp:t num:f tags:nil e:t author:nil
+#+OPTIONS: toc:3 timestamp:t num:f tags:nil e:t author:t email:t date:nil
 #+STARTUP: content indent showall
 #+LANGUAGE:   en
 #+PROPERTY:   header-args:sh      :tangle no
 #+PROPERTY:   header-args:scheme  :tangle no
 
+#+begin_center
+/Usage/: this is a personal boot configuration for one host. It hard-codes a
+disk UUID, a user, Unix groups, the Guix store layout, and
+specific Shepherd/Guix generations. It is /not/ a portable installer. Borrow
+individual services at your own risk and audit them first.
+
+/AI assistance/: produced with [[https:opencode.ai][opencode]], model [[https://poolside.ai/blog/introducing-laguna-s-2-1][=poolside/laguna-s-2.1=]]
+No warranty is provided.
+
+/License/: all prose and documentation in this repository are CC0 1.0 Universal (no rights
+reserved). The Scheme, shell, and s6-linux-init scripts are licensed GPL-3.0-or-later. The same
+license as GNU Shepherd and Guile, keeping derivatives compatible with the rest of the stack.
+SPDX-License-Identifier: CC0-1.0 OR GPL-3.0-or-later.
+
+/Source/: you can view in [[https://github.com/mmdbalkhi/shepherd-void.git ][gh:shepherd-void]]
+#+end_center
+
 * Introduction
 
-This is the only documentation this boot stack needs.  It describes, end to
-end, how a single Void Linux root with a Guix-installed Shepherd ~0.10.5~ (and a
+This is the only documentation this boot stack needs. It describes, end to end,
+how a single Void Linux root with a Guix-installed Shepherd ~0.10.5~ (and a
 Guile ~3.0.9~) comes up, and how to add a new service to it.[fn:why-not]
 
-A machine has one service manager, not three.  Here it is #4, with s6 reduced
-to the smallest thing that makes that possible.
+A machine has one service manager, not three. Here it is #4, with s6 reduced to
+the smallest thing that makes that possible.
 
 #+BEGIN_marginnote
 =guix build shepherd= resolves to the store path of Shepherd; the symlink keeps
-=/usr/local/bin/shepherd= stable across profile generations. [[info:(guix)Invoking guix Commands][guix build]]
-See the Guix manual for details on profile generation stability.
+=/usr/local/bin/shepherd= stable across profile generations. [[info:(guix)Invoking guix Commands][guix build]] See the
+Guix manual for details on profile generation stability.
 #+END_marginnote
 
 * The three layers
@@ -50,8 +66,8 @@ See the Guix manual for details on profile generation stability.
 #+end_src
 
 S6's only job is Layer 2: bring the store and runtime writable, then hand
-control to Shepherd with =(exec)=. Shepherd then runs the whole graph; s6
-does /not/ manage services.
+control to Shepherd with =(exec)=. Shepherd then runs the whole graph; s6 does
+/not/ manage services.
 
 
 #+BEGIN_SRC sh :tangle no :exports code
@@ -76,16 +92,16 @@ mkdir -p /run/shepherd
 #+END_SRC
 
 #+BEGIN_marginnote
-The generator writes =current/scripts/rc.init= from =skel/rc.init=.  Edit the
+The generator writes =current/scripts/rc.init= from =skel/rc.init=. Edit the
 =skel= copy and re-run =s6-linux-init-maker=. never patch =current= directly.
 #+END_marginnote
 
 
 * Shepherd's graph
 
-Shepherd does not have a "boot script". It has a dependency graph and a
-target symbol that means "everything that must be up"; starting that symbol
-resolves and runs the whole graph in parallel.
+Shepherd does not have a "boot script". It has a dependency graph and a target
+symbol that means "everything that must be up"; starting that symbol resolves
+and runs the whole graph in parallel.
 
 The targets live in =services.d/28-boot-stages.scm= [fn:stages]
 
@@ -137,106 +153,69 @@ Boot DAG (what actually gates the gettys):
 #+END_EXAMPLE
 
 #+BEGIN_marginnote
-The solid lines are =#:requirement= edges. Gettys depend on =boot-ready=,
-not on network/D-Bus/desktop, so a slow link or GUI never blanks the login
-prompt.  =udev= is =eudev= from Void (Shepherd just supervises it); device
-nodes are pre-seeded by =05-static-devnodes.scm= for udev's very first run.
-[[https://wiki.archlinux.org/title/Udev][Udev (ArchWiki)]] covers the rules format.
+The solid lines are =#:requirement= edges. Gettys depend on =boot-ready=, not on
+network/D-Bus/desktop, so a slow link or GUI never blanks the login prompt.
+=udev= is =eudev= from Void (Shepherd just supervises it); device nodes are
+pre-seeded by =05-static-devnodes.scm= for udev's very first run. [[https://wiki.archlinux.org/title/Udev][Udev
+(ArchWiki)]] covers the rules format.
 #+END_marginnote
 
 
 * Add a service (template + worked example)
 
 Every service is a ~(service '(provides) #:requirement '(...) #:start ...)~.
-That /is/ the configuration: declare what it /is/, what it /waits on/, and
-what it /does/, and never a serial =start= ladder.
-
-Template (copy to =services.d/NN-name.scm=):
-
-#+BEGIN_SRC scheme :tangle no
-;; NN-name.scm --- one line.
-
-;; Why it exists: <sentence>.  Why that dependency list: <edges>.
-(define name
-  (service '(name alias)
-    #:documentation "Human sentence."
-    #:requirement '(the-services-it-cannot-run-without)
-    #:start  (make-forkexec-constructor '("name" "args" …)
-                  #:log-file "/var/log/name.log")
-    #:stop   (make-kill-destructor)
-    #:respawn? #t))            ; one-shot? #t for transient steps
-
-(register-services (list name))
-#+END_SRC
+That /is/ the configuration: declare what it /is/, what it /waits on/, and what
+it /does/, and never a serial =start= ladder.
 
 Checklist:
 1. Add the file (zero-padded =NN= sorts before 28-boot-stages).
-2. Pick /real/ provides (a list of symbols; not a string, not a list-in-a-list) and the minimal =#:requirement=.
-3. For daemons: argv list + =#:log-file= + =make-kill-destructor= + =#:respawn? #t=.
-4. For one-shots: use a pure Guile =(lambda _ (zero? (system* ...)))= or =~run-or-ignored~= + =#:one-shot? #t= + =#:stop (const #t)=.
-5. Wire it into a stage: edit the =#:requirement= of =interactive= or =fully-online='s =stage= in 28-boot-stages if it should be part of one.[fn:addto]
-6. Reload: =herd load init.scm=.  Shepherd restarts only what changed; already-running services are untouched.
+2. Pick /real/ provides (a list of symbols; not a string, not a list-in-a-list)
+   and the minimal =#:requirement=.
+3. For daemons: argv list + =#:log-file= + =make-kill-destructor= + =#:respawn?
+   #t=.
+4. For one-shots: use a pure Guile =(lambda _ (zero? (system* ...)))= or
+   =~run-or-ignored~= + =#:one-shot? #t= + =#:stop (const #t)=.
+5. Wire it into a stage: edit the =#:requirement= of =interactive= or
+   =fully-online='s =stage= in 28-boot-stages if it should be part of
+   one.[fn:addto]
+6. Reload: =herd load init.scm=. Shepherd restarts only what changed;
+   already-running services are untouched.
+
+** Template for daemon(ssh, etc.)
+#+INCLUDE: "examples/30-daemon.scm" src scheme -l
 
 ** Template for One-Shots (mkdir, swapon, sysctl, etc.):
-
-#+BEGIN_SRC scheme :tangle no
-;;; NN-name.scm --- one-shot setup task.
-
-(define name
-  (service '(name)
-    #:documentation "Human sentence."
-    #:requirement '(the-services-it-cannot-run-without)
-    #:start (lambda _
-              ;; Pure Guile: no shell scripts, no make-system-constructor
-              (zero? (system* "command" "arg1" "arg2")))
-    #:stop (const #t)
-    #:one-shot? #t))
-
-(register-services (list name))
-#+END_SRC
+#+INCLUDE: "examples/31-oneshot.scm" src scheme -l
 
 ** example: /syncthing/ as a system service ([fn:syncthing]):
-
-#+BEGIN_SRC scheme :tangle no
-;;; 31-syncthing-example.scm --- Syncthing daemon
-
-;; Needs: network up (network-manager), persistent data on disk (file-systems),
-;; and an unprivileged user + homedir.  Not required for login, so it lives in
-;; ~fully-online~ and floats behind the gettys.
-(define syncthing
-  (service '(syncthing)
-    #:documentation "Syncthing file synchronizer (system instance)."
-    #:requirement '(network-manager file-systems)
-    #:start (make-forkexec-constructor
-             '("/usr/bin/syncthing" "-no-browser" "-gui-address=0.0.0.0:8384")
-             #:log-file "/var/log/syncthing.log")
-    #:stop (make-kill-destructor)
-    #:respawn? #t))
-
-(register-services (list syncthing))
-#+END_SRC
+#+INCLUDE: "examples/32-syncthing-example.scm" src scheme -l
 
 To enable: =cp= the file into =/etc/shepherd/services.d/=, add =syncthing= to
-the =fully-online= =stage= requirements in =28-boot-stages.scm=, then =herd load init.scm=.
-A new =syncthing= service appears in =herd status= with no
-Shepherd restart.[fn:syncthingurl]
+the =fully-online= =stage= requirements in =28-boot-stages.scm=, then =herd load
+init.scm=. A new =syncthing= service appears in =herd status= with no Shepherd
+restart.[fn:syncthingurl]
 
 #+BEGIN_marginnote
-[[https://www.syncthing.net/][Syncthing]] ships a systemd unit that does the same =network-online +
-filesystem= dance; this is the manual port.  For a per-user GUI session, put
-the same service under =user-shepherd/services.d/= with =GUIX_PROFILE= set.
+[[https://www.syncthing.net/][Syncthing]] ships a systemd unit that does the same =network-online + filesystem=
+dance; this is the manual port. For a per-user GUI session, put the same service
+under =user-shepherd/services.d/= with =GUIX_PROFILE= set.
 #+END_marginnote
 
 
 * Runtime model (what you observe at boot)
 
-- =/etc/shepherd/init.scm= loads =services.d/*.scm=, then =(start-in-the-background '(fully-online))=.
-- Shepherd resolves requirements breadth-first and /starts them concurrently/ where the graph allows.[fn:par]
-  You see interleaved =Starting service X= / =Service X has been started.= lines in =/var/log/shepherd.log=.
-- A service whose =#:start= throws is marked failed; dependents are skipped / retried, logged,
-  and the boot continues on other branches. one bad daemon never hangs the whole boot.[fn:fail]
-- =boot-ready= is the barrier behind which gettys wait; =fully-online= is everything else that is allowed to lag.
-- On shutdown, services run their =#:stop= thunks in reverse-dependency order (e.g., =seedrng save=, =hwclock --systohc=, cleaning =/tmp=).
+- =/etc/shepherd/init.scm= loads =services.d/*.scm=, then
+  =(start-in-the-background '(fully-online))=.
+- Shepherd resolves requirements breadth-first and /starts them concurrently/
+  where the graph allows.[fn:par] You see interleaved =Starting service X= /
+  =Service X has been started.= lines in =/var/log/shepherd.log=.
+- A service whose =#:start= throws is marked failed; dependents are skipped /
+  retried, logged, and the boot continues on other branches. one bad daemon
+  never hangs the whole boot.[fn:fail]
+- =boot-ready= is the barrier behind which gettys wait; =fully-online= is
+  everything else that is allowed to lag.
+- On shutdown, services run their =#:stop= thunks in reverse-dependency order
+  (e.g., =seedrng save=, =hwclock --systohc=, cleaning =/tmp=).
 #+BEGIN_SRC text :tangle no
 $ herd status                   # on the running machine
 root                            (running)   uptime 00:00:47
@@ -251,17 +230,20 @@ $ tail -f /var/log/shepherd.log  # the spinner feeds this
 #+END_SRC
 
 #+BEGIN_marginnote
-Shepherd also exposes =herd = the CLI.  =herd help=, =herd doc <service>=, and
+Shepherd also exposes =herd = the CLI. =herd help=, =herd doc <service>=, and
 =[[info:(shepherd)Invoking shepherd][info:(shepherd)]]= cover every flag.
 #+END_marginnote
 
 
 * Layout
+:PROPERTIES:
+:ID:       42680311-d011-48f8-bfb6-ca39e938b96d
+:END:
 
 #+BEGIN_SRC text :tangle no
 shepherd/
 ├── readme.org                    <- you are here
-├── init.scm                    <- Shepherd config entry point
+├── init.scm                      <- Shepherd config entry point
 ├── services.d/
 │   ├── 00-utilities.scm          <- shared helpers (mounted?, read-rc-conf-var)
 │   ├── 01-root.scm               <- root-rw remount
@@ -319,15 +301,19 @@ shepherd/
 
 While the system Shepherd manages the machine, the User Shepherd manages your
 graphical session (Sway, PipeWire, D-Bus, etc.). It runs as your regular user,
-supervising Wayland compositors and desktop daemons without needing ~systemd --user~.
+supervising Wayland compositors and desktop daemons without needing ~systemd
+--user~.
 
 ** Session Flow
 1. ~init.scm~ sets ~XDG_RUNTIME_DIR~ and ~DBUS_SESSION_BUS_ADDRESS~.
-2. ~01-runtime-dirs~ ensures the runtime directory exists with strict ~0700~ permissions.
-3. ~02-dbus~, ~03-pipewire~, and ~04-gpg-agent~ start in parallel (no GUI dependency).
+2. ~01-runtime-dirs~ ensures the runtime directory exists with strict ~0700~
+   permissions.
+3. ~02-dbus~, ~03-pipewire~, and ~04-gpg-agent~ start in parallel (no GUI
+   dependency).
 4. ~05-sway~ starts the compositor (depends on ~dbus~ and ~runtime-dirs~).
 5. ~06-graphical-session~ barrier resolves once Sway is running.
-6. ALL GUI services (~dunst~, ~portals~, ~swayidle~, ~clipman~, etc.) start in parallel.
+6. ALL GUI services (~dunst~, ~portals~, ~swayidle~, ~clipman~, etc.) start in
+   parallel.
 
 ** Installation & Bring Up
 
@@ -347,9 +333,9 @@ shepherd -s /run/shepherd/$(id -u).socket \
 #+END_SRC
 
 #+BEGIN_marginnote
-To start User Shepherd automatically on TTY login, add this to your =~/.bash_profile=
-or =~/.profile=:
-~if [ -z "$WAYLAND_DISPLAY" ] && [ "$XDG_VTNR" -eq 1 ]; then exec shepherd -I; fi~
+To start User Shepherd automatically on TTY login, add this to your
+=~/.bash_profile= or =~/.profile=: ~if [ -z "$WAYLAND_DISPLAY" ] && [
+"$XDG_VTNR" -eq 1 ]; then exec shepherd -I; fi~
 #+END_marginnote
 
 ** Managing the Session
@@ -391,9 +377,87 @@ exec /etc/s6-linux-init/current/scripts/rc.init default
 
 #+BEGIN_marginnote
 =guix build shepherd= resolves to the store path of Shepherd; the symlink keeps
-=/usr/local/bin/shepherd= stable across profile generations.  [[info:(guix)Invoking guix Commands][=guix build=]]
+=/usr/local/bin/shepherd= stable across profile generations. [[info:(guix)Invoking guix Commands][=guix build=]]
 #+END_marginnote
 
+* Appendix: configuration reference (source of truth)
+This appendix embeds the actual Scheme configuration so this readme, carries the
+source of truth alongside the prose above. Each file leads with a header comment
+describing its role, and services carry a =#:documentation= string
+
+** System Shepherd entry point
+#+INCLUDE: "init.scm" src scheme -l
+
+** System service definitions
+#+INCLUDE: "services.d/00-utilities.scm" src scheme -l
+#+INCLUDE: "services.d/01-root.scm" src scheme -l
+#+INCLUDE: "services.d/02-pseudo-fs.scm" src scheme -l
+#+INCLUDE: "services.d/02-tmpfs.scm" src scheme -l
+#+INCLUDE: "services.d/03-console.scm" src scheme -l
+#+INCLUDE: "services.d/03-runtime.scm" src scheme -l
+#+INCLUDE: "services.d/04-cgroups.scm" src scheme -l
+#+INCLUDE: "services.d/05-static-devnodes.scm" src scheme -l
+#+INCLUDE: "services.d/06-kernel-modules.scm" src scheme -l
+#+INCLUDE: "services.d/07-udev.scm" src scheme -l
+#+INCLUDE: "services.d/08-file-systems.scm" src scheme -l
+#+INCLUDE: "services.d/09-hostname.scm" src scheme -l
+#+INCLUDE: "services.d/10-hwclock.scm" src scheme -l
+#+INCLUDE: "services.d/10-sysctl.scm" src scheme -l
+#+INCLUDE: "services.d/10-timezone.scm" src scheme -l
+#+INCLUDE: "services.d/11-swap.scm" src scheme -l
+#+INCLUDE: "services.d/12-dmesg.scm" src scheme -l
+#+INCLUDE: "services.d/13-random-seed.scm" src scheme -l
+#+INCLUDE: "services.d/14-log-files.scm" src scheme -l
+#+INCLUDE: "services.d/15-syslog.scm" src scheme -l
+#+INCLUDE: "services.d/16-guix-daemon.scm" src scheme -l
+#+INCLUDE: "services.d/17-getty.scm" src scheme -l
+#+INCLUDE: "services.d/18-loopback.scm" src scheme -l
+#+INCLUDE: "services.d/19-dbus.scm" src scheme -l
+#+INCLUDE: "services.d/20-network.scm" src scheme -l
+#+INCLUDE: "services.d/21-polkit.scm" src scheme -l
+#+INCLUDE: "services.d/22-elogind.scm" src scheme -l
+#+INCLUDE: "services.d/23-seatd.scm" src scheme -l
+#+INCLUDE: "services.d/24-acpid.scm" src scheme -l
+#+INCLUDE: "services.d/25-zram.scm" src scheme -l
+#+INCLUDE: "services.d/26-openssh.scm" src scheme -l
+#+INCLUDE: "services.d/27-chrony.scm" src scheme -l
+#+INCLUDE: "services.d/28-boot-stages.scm" src scheme -l
+#+INCLUDE: "services.d/29-power.scm" src scheme -l
+
+** User Shepherd entry point
+#+INCLUDE: "user-shepherd/init.scm" src scheme -l
+
+** User Shepherd service definitions
+#+INCLUDE: "user-shepherd/services.d/00-utilities.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/01-runtime-dirs.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/03-pipewire.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/04-gpg-agent.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/05-sway.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/06-graphical-session.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/07-portals.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/08-dunst.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/09-swayidle.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/10-sway-audio-idle-inhibit.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/11-wlsunset.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/12-clipman.scm" src scheme -l
+#+INCLUDE: "user-shepherd/services.d/13-azotebg.scm" src scheme -l
+
+** s6-linux-init skel files
+#+INCLUDE: "s6-linux-init/skel/rc.init" src sh -l
+#+INCLUDE: "s6-linux-init/skel/rc.shutdown" src sh -l
+#+INCLUDE: "s6-linux-init/skel/rc.shutdown.final" src sh -l
+#+INCLUDE: "s6-linux-init/skel/runlevel" src sh -l
+
+** Commands
+#+INCLUDE: "bin/init" src sh -l
+#+INCLUDE: "bin/halt" src sh -l
+#+INCLUDE: "bin/poweroff" src sh -l
+#+INCLUDE: "bin/reboot" src sh -l
+
+* Acknowledge
+ * [[https://gnu.org/software/guile][GNU Guile]]
+ * [[https://shepherding.services/][GNU Shepherd]]
+ * [[https://github.com/wreedb/void-shepherd][Wreedb's void-shepherd]]
 
 * Footnotes
 [fn:why-not] /Why not just use Guix System's =operating-system= /services/?
